@@ -351,6 +351,15 @@ function renderDetail(t) {
   focusPath = focusPath.length ? focusPath : [tree];
   const main = $("#main");
   const projection = t.cost_usd != null ? "&asymp; " + money(t.cost_usd * 1000) + " / 1k calls" : "";
+  const ra = t.analysis;
+  const flameIc = '<svg width="22" height="22" viewBox="0 0 24 24" fill="#f7a13b"><path d="M13 2c.9 3.2-2.2 4.3-2.2 7.4a2.8 2.8 0 005.6.2c0-1-.4-1.9-1-2.8 2.2 1 4 3.2 4 6.1A7.4 7.4 0 015 13.2C5 8.6 9.4 6.6 13 2z"/></svg>';
+  const reclaimBanner = (ra && (ra.reclaimable_tokens || ra.reclaimable_usd))
+    ? `<div class="reclaim-call"><span class="rc-ic">${flameIc}</span>`+
+      `<span class="rc-text">Reclaimable on this call: <b>${fmt(ra.reclaimable_tokens)} tokens</b>`+
+      `${ra.reclaimable_usd ? ` &middot; <b class="save">~${money(ra.reclaimable_usd)}</b>` : ""}</span>`+
+      `${ra.reclaimable_usd && t.cost_usd ? `<span class="rc-pct">${(ra.reclaimable_usd / t.cost_usd * 100).toFixed(0)}% of this call</span>` : ""}`+
+      `</div>`
+    : "";
   main.innerHTML =
     `<div class="detail-head">
        <div class="dh-title">
@@ -365,6 +374,7 @@ function renderDetail(t) {
          <div class="stat cost"><b class="num">${money(t.cost_usd)}</b><span>${projection || 'est. cost'}</span></div>
        </div>
      </div>
+     ${reclaimBanner}
      <div id="insight"></div>
      <div id="wgauge"></div>
      <div class="panel">
@@ -450,11 +460,6 @@ function renderSuggestions(tree, t) {
     return `<div class="sugg ${f.severity}"><span class="si">${OPT_ICON[f.severity] || OPT_ICON.tip}</span>`+
       `<span class="stext"><b>${esc(f.title)}</b> ${esc(f.body)}${chip}</span></div>`;
   }).join("");
-  if (a && (a.reclaimable_tokens || a.reclaimable_usd)) {
-    el.innerHTML += `<div class="reclaim-foot">reclaimable on this call: `+
-      `<b>${fmt(a.reclaimable_tokens)} tok</b>`+
-      `${a.reclaimable_usd ? ` &middot; <b class="save">~${money(a.reclaimable_usd)}</b>` : ""}</div>`;
-  }
 }
 
 function renderInsight(tree) {
