@@ -195,6 +195,42 @@ def test_anthropic_captures_cache_read(tmp_path):
     assert app.state.store.recent(1)[0]["cached_tokens"] == 1300
 
 
+def test_openai_captures_called_tools(tmp_path):
+    canned = {
+        "choices": [{"message": {"content": None, "tool_calls": [
+            {"id": "c1", "type": "function", "function": {"name": "search", "arguments": "{}"}},
+        ]}}],
+        "usage": {"prompt_tokens": 100, "completion_tokens": 5, "total_tokens": 105},
+    }
+    app = create_app(db_path=str(tmp_path / "ct.db"), upstream="http://mock")
+    app.state.client = httpx.AsyncClient(transport=_mock("/v1/chat/completions", json=canned))
+    client = TestClient(app)
+    client.post(
+        "/v1/chat/completions",
+        json={"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}],
+              "tools": [{"type": "function", "function": {"name": "search"}}]},
+    )
+    assert app.state.store.get(app.state.store.recent(1)[0]["id"])["called_tools"] == ["search"]
+
+
+def test_anthropic_captures_called_tools(tmp_path):
+    canned = {
+        "content": [
+            {"type": "text", "text": "let me search"},
+            {"type": "tool_use", "id": "tu1", "name": "web_search", "input": {"q": "x"}},
+        ],
+        "usage": {"input_tokens": 80, "output_tokens": 6},
+    }
+    app = create_app(db_path=str(tmp_path / "ct.db"), upstream="http://mock")
+    app.state.client = httpx.AsyncClient(transport=_mock("/v1/messages", json=canned))
+    client = TestClient(app)
+    client.post(
+        "/v1/messages",
+        json={"model": "claude-3-5-sonnet", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert app.state.store.recent(1)[0]["called_tools"] == ["web_search"]
+
+
 def test_health():
     app = create_app(db_path=":memory:", upstream="http://example")
     client = TestClient(app)

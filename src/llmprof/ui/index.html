@@ -130,6 +130,8 @@
   .leg .ltok { font-family: var(--mono); color: var(--muted); font-size: 12px; }
   .leg .lpct { font-family: var(--mono); color: var(--faint); font-size: 12px; width: 44px; text-align: right; }
   .leg .lcost { font-family: var(--mono); color: var(--accent-2); font-size: 12px; width: 64px; text-align: right; }
+  .leg.dim { opacity: 0.5; }
+  .leg .lname .pill { margin-left: 6px; }
 
   /* sidebar toolbar */
   .side-tools { display: flex; gap: 8px; padding: 6px 12px 10px; position: sticky; top: 33px; background: var(--bg); z-index: 1; }
@@ -388,10 +390,14 @@ function renderTools(tree, t) {
   $("#tools-count").textContent =
     `${tools.length} tools, ${tsNode.tokens.toLocaleString()} tok` +
     (inP != null ? ` (${money(tsNode.tokens/1000*inP)}/call)` : "");
+  const called = new Set(t.called_tools || []);
+  const knowCalls = called.size > 0;
   el.innerHTML = tools.map(n => {
     const cost = inP != null ? money(n.tokens/1000*inP) : "";
-    return `<div class="leg"><span class="sw" style="background:${nodeColor(n, tsNode)}"></span>`+
-      `<span class="lname">${esc(n.name)}</span>`+
+    const unused = knowCalls && !called.has(n.name);
+    const tag = unused ? ' <span class="pill">unused</span>' : "";
+    return `<div class="leg${unused ? ' dim' : ''}"><span class="sw" style="background:${nodeColor(n, tsNode)}"></span>`+
+      `<span class="lname">${esc(n.name)}${tag}</span>`+
       `<span class="ltok num">${n.tokens.toLocaleString()}</span>`+
       `<span class="lpct">${(n.tokens/total*100).toFixed(1)}%</span>`+
       `<span class="lcost">${cost}</span></div>`;
@@ -421,6 +427,17 @@ function renderSuggestions(tree, t) {
     out.push(["warn", `<b>History and tool results are ${(hist/total*100).toFixed(0)}% of the context</b> (${hist.toLocaleString()} tok).${save(hist)} Summarize or truncate older turns.`]);
   if ((comp["system prompt"] || 0) >= 1500)
     out.push(["tip", `System prompt is <b>${comp["system prompt"].toLocaleString()} tokens</b> of fixed overhead on every call.`]);
+  // tools defined but not called on this request
+  const tsNode = (tree.children || []).find(c => c.name === "tool schemas");
+  const called = new Set(t.called_tools || []);
+  if (tsNode && tsNode.children && called.size > 0) {
+    const unused = tsNode.children.filter(c => !called.has(c.name));
+    if (unused.length) {
+      const wasted = unused.reduce((a, c) => a + c.tokens, 0);
+      const names = unused.map(c => esc(c.name)).slice(0, 6).join(", ") + (unused.length > 6 ? ", ..." : "");
+      out.push(["warn", `<b>${unused.length} of ${tsNode.children.length} tools were not called</b> on this request (${names}): ${wasted.toLocaleString()} tok.${save(wasted)} If they are not needed here, drop them from the call.`]);
+    }
+  }
   if (!out.length) out.push(["ok", "No obvious waste detected. This context looks lean."]);
 
   const ICON = {

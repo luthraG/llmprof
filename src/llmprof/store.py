@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS traces (
     streamed INTEGER,
     components TEXT,
     detail TEXT,
-    cached_tokens INTEGER
+    cached_tokens INTEGER,
+    called_tools TEXT
 );
 """
 
@@ -61,6 +62,8 @@ class Store:
                 conn.execute("ALTER TABLE traces ADD COLUMN detail TEXT")
             if "cached_tokens" not in cols:
                 conn.execute("ALTER TABLE traces ADD COLUMN cached_tokens INTEGER")
+            if "called_tools" not in cols:
+                conn.execute("ALTER TABLE traces ADD COLUMN called_tools TEXT")
 
     def record(self, trace: dict) -> None:
         with self._connect() as conn:
@@ -68,8 +71,8 @@ class Store:
                 """INSERT INTO traces
                    (ts, provider, model, endpoint, status, prompt_tokens,
                     completion_tokens, total_tokens, cost_usd, streamed, components, detail,
-                    cached_tokens)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    cached_tokens, called_tools)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     trace.get("ts", time.time()),
                     trace.get("provider"),
@@ -84,12 +87,14 @@ class Store:
                     json.dumps(trace.get("components") or {}),
                     json.dumps(trace.get("detail")) if trace.get("detail") else None,
                     trace.get("cached_tokens"),
+                    json.dumps(trace.get("called_tools")) if trace.get("called_tools") else None,
                 ),
             )
 
     def _row(self, r: sqlite3.Row, with_detail: bool = False) -> dict:
         d = dict(r)
         d["components"] = json.loads(d.get("components") or "{}")
+        d["called_tools"] = json.loads(d.get("called_tools") or "[]")
         detail = d.pop("detail", None)
         if with_detail:
             d["detail"] = json.loads(detail) if detail else None

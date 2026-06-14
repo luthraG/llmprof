@@ -119,9 +119,13 @@ def _usage_from_body(data: bytes, provider: str) -> tuple[int | None, int | None
 def _scrape_openai(chunk: bytes, state: dict) -> None:
     for obj in _sse_objects(chunk):
         try:
-            delta = (obj.get("choices") or [{}])[0].get("delta", {}).get("content")
-            if delta:
-                state["text"].append(delta)
+            delta = (obj.get("choices") or [{}])[0].get("delta", {}) or {}
+            if delta.get("content"):
+                state["text"].append(delta["content"])
+            for tc in delta.get("tool_calls") or []:
+                fn = (tc.get("function") or {}).get("name")
+                if fn and fn not in state.setdefault("tools", []):
+                    state["tools"].append(fn)
             usage = obj.get("usage")  # present only with stream_options include_usage
             if usage:
                 state["input"] = usage.get("prompt_tokens", state["input"])
@@ -142,6 +146,11 @@ def _scrape_anthropic(chunk: bytes, state: dict) -> None:
             state["output"] = usage.get("output_tokens", state["output"])
             if usage.get("cache_read_input_tokens") is not None:
                 state["cached"] = usage["cache_read_input_tokens"]
+        elif t == "content_block_start":
+            block = obj.get("content_block") or {}
+            if block.get("type") == "tool_use" and block.get("name"):
+                if block["name"] not in state.setdefault("tools", []):
+                    state["tools"].append(block["name"])
         elif t == "content_block_delta":
             text = (obj.get("delta") or {}).get("text")
             if text:
@@ -150,6 +159,26 @@ def _scrape_anthropic(chunk: bytes, state: dict) -> None:
             usage = obj.get("usage") or {}
             if "output_tokens" in usage:
                 state["output"] = usage["output_tokens"]
+
+
+def _called_tools_from_body(data: bytes, provider: str) -> list[str]:
+    """Tool names the model actually invoked in a (buffered) response."""
+    try:
+        obj = json.loads(data)
+    except (json.JSONDecodeError, AttributeError):
+        return []
+    names: list[str] = []
+    if provider == "anthropic":
+        for block in obj.get("content") or []:
+            if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name"):
+                names.append(block["name"])
+    else:
+        for choice in obj.get("choices") or []:
+            for tc in (choice.get("message") or {}).get("tool_calls") or []:
+                fn = (tc.get("function") or {}).get("name")
+                if fn:
+                    names.append(fn)
+    return list(dict.fromkeys(names))  # unique, order-preserving
 
 
 def _sse_objects(chunk: bytes):
@@ -191,7 +220,7 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
         upstream = await app.state.client.send(req, stream=True)
         status = upstream.status_code
         scrape = _scrape_anthropic if provider == "anthropic" else _scrape_openai
-        state = {"text": [], "input": None, "output": None, "cached": None}
+        state = {"text": [], "input": None, "output": None, "cached": None, "tools": []}
 
         async def gen():
             async for chunk in upstream.aiter_raw():
@@ -201,8 +230,8 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
             # tokenization runs in a threadpool after the stream, off the loop
             await run_in_threadpool(
                 _record_blocking, app, provider, model, payload,
-                state["input"], state["output"], state["cached"], "".join(state["text"]),
-                status, started, True,
+                state["input"], state["output"], state["cached"], state["tools"],
+                "".join(state["text"]), status, started, True,
             )
 
         return StreamingResponse(
@@ -214,11 +243,12 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
     upstream = await app.state.client.post(url, content=body, headers=headers)
     data = upstream.content
     usage_in, usage_out, cached = _usage_from_body(data, provider)
+    called = _called_tools_from_body(data, provider)
     # forward immediately; attribute + record in the background so the proxy adds
     # essentially no latency to the proxied call.
     record = BackgroundTask(
         _record_blocking, app, provider, model, payload,
-        usage_in, usage_out, cached, None, upstream.status_code, started, False,
+        usage_in, usage_out, cached, called, None, upstream.status_code, started, False,
     )
     return Response(
         content=data,
@@ -229,7 +259,7 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
 
 
 def _record_blocking(app, provider, model, payload, usage_in, usage_out, cached,
-                     completion_text, status, started, streamed):
+                     called_tools, completion_text, status, started, streamed):
     """All the CPU work (tokenization + attribution) and the DB write. Runs in a
     threadpool / background task so it never blocks the proxied request."""
     breakdown = _attribute(payload, provider)
@@ -255,6 +285,7 @@ def _record_blocking(app, provider, model, payload, usage_in, usage_out, cached,
             "components": breakdown["components"],
             "detail": breakdown["tree"],
             "cached_tokens": cached,
+            "called_tools": called_tools,
         }
     )
 
