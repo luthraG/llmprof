@@ -17,12 +17,17 @@ import tiktoken
 _PER_MESSAGE_OVERHEAD = 4
 _REPLY_PRIMING = 3
 
-_ROLE_LABELS = {
+_OPENAI_ROLE_LABELS = {
     "system": "system prompt",
     "user": "user input",
     "assistant": "history (assistant)",
     "tool": "tool results",
     "function": "tool results",
+}
+
+_ANTHROPIC_ROLE_LABELS = {
+    "user": "user input",
+    "assistant": "history (assistant)",
 }
 
 
@@ -31,6 +36,7 @@ def _encoding(model: str):
     try:
         return tiktoken.encoding_for_model(model)
     except Exception:
+        # cl100k_base is a reasonable approximation for non-OpenAI models
         return tiktoken.get_encoding("cl100k_base")
 
 
@@ -40,23 +46,24 @@ def count_tokens(text: str, model: str = "gpt-4o") -> int:
     return len(_encoding(model).encode(text))
 
 
-def _message_text(message: dict) -> str:
+def _json(value) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+# --------------------------------------------------------------------------- #
+# OpenAI chat completions
+# --------------------------------------------------------------------------- #
+def _openai_message_text(message: dict) -> str:
     content = message.get("content")
     if isinstance(content, str):
         return content
     if isinstance(content, list):  # multimodal content blocks
-        return " ".join(
-            part.get("text", "") for part in content if isinstance(part, dict)
-        )
+        return " ".join(part.get("text", "") for part in content if isinstance(part, dict))
     return ""
 
 
-def attribute(messages: list[dict] | None, tools=None, model: str = "gpt-4o") -> dict:
-    """Break a chat request into token components.
-
-    Returns {"components": {label: tokens}, "total": int, "model": str,
-    "approximate": bool}. Components sum (with priming) to total.
-    """
+def attribute_openai(messages: list[dict] | None, tools=None, model: str = "gpt-4o") -> dict:
+    """Break an OpenAI chat request into token components."""
     enc = _encoding(model)
     components: dict[str, int] = {}
 
@@ -65,17 +72,84 @@ def attribute(messages: list[dict] | None, tools=None, model: str = "gpt-4o") ->
 
     for message in messages or []:
         role = message.get("role", "user")
-        toks = len(enc.encode(_message_text(message))) + _PER_MESSAGE_OVERHEAD
-        add(_ROLE_LABELS.get(role, role), toks)
+        toks = len(enc.encode(_openai_message_text(message))) + _PER_MESSAGE_OVERHEAD
+        add(_OPENAI_ROLE_LABELS.get(role, role), toks)
 
     if tools:
-        # tool/function schemas are sent verbatim and are a common source of bloat
-        add("tool schemas", len(enc.encode(json.dumps(tools, ensure_ascii=False))))
+        add("tool schemas", len(enc.encode(_json(tools))))
 
     total = sum(components.values()) + _REPLY_PRIMING
-    return {
-        "components": components,
-        "total": total,
-        "model": model,
-        "approximate": True,
-    }
+    return {"components": components, "total": total, "model": model, "approximate": True}
+
+
+# --------------------------------------------------------------------------- #
+# Anthropic messages
+# --------------------------------------------------------------------------- #
+def _anthropic_message_parts(message: dict) -> list[tuple[str, str]]:
+    """Yield (component_label, text) for each block in an Anthropic message."""
+    role = message.get("role", "user")
+    role_label = _ANTHROPIC_ROLE_LABELS.get(role, role)
+    content = message.get("content")
+    parts: list[tuple[str, str]] = []
+
+    if isinstance(content, str):
+        parts.append((role_label, content))
+        return parts
+
+    for block in content or []:
+        if not isinstance(block, dict):
+            continue
+        btype = block.get("type")
+        if btype == "text":
+            parts.append((role_label, block.get("text", "")))
+        elif btype == "tool_use":
+            parts.append(("tool calls", _json(block.get("input", {}))))
+        elif btype == "tool_result":
+            inner = block.get("content")
+            if isinstance(inner, str):
+                text = inner
+            else:
+                text = " ".join(
+                    b.get("text", "") for b in (inner or []) if isinstance(b, dict)
+                )
+            parts.append(("tool results", text))
+    return parts
+
+
+def attribute_anthropic(
+    system=None, messages: list[dict] | None = None, tools=None,
+    model: str = "claude-3-5-sonnet",
+) -> dict:
+    """Break an Anthropic messages request into token components.
+
+    Anthropic puts the system prompt at the top level (not as a message), uses
+    user/assistant roles, and carries tool_use / tool_result content blocks.
+    Token counts approximate Claude's tokenizer with cl100k_base.
+    """
+    enc = _encoding(model)
+    components: dict[str, int] = {}
+
+    def add(label: str, text: str) -> None:
+        if text:
+            components[label] = components.get(label, 0) + len(enc.encode(text))
+
+    if system:
+        if isinstance(system, str):
+            sys_text = system
+        else:
+            sys_text = " ".join(b.get("text", "") for b in system if isinstance(b, dict))
+        add("system prompt", sys_text)
+
+    for message in messages or []:
+        for label, text in _anthropic_message_parts(message):
+            add(label, text)
+
+    if tools:
+        add("tool schemas", _json(tools))
+
+    total = sum(components.values())
+    return {"components": components, "total": total, "model": model, "approximate": True}
+
+
+# Back-compat alias (OpenAI was the first provider supported).
+attribute = attribute_openai
