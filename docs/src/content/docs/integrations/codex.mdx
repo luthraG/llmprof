@@ -18,24 +18,29 @@ import { Steps } from '@astrojs/starlight/components';
    llmprof up
    ```
 
-2. **Point Codex at the proxy** with the base-URL environment variable:
-
-   ```bash
-   export OPENAI_BASE_URL=http://localhost:4000/v1
-   codex
-   ```
-
-   Or set it in `~/.codex/config.toml`:
+2. **Point Codex at the proxy in `~/.codex/config.toml`.** Codex ignores the
+   `OPENAI_BASE_URL` environment variable, so the base URL has to go in the
+   config as a custom provider (the built-in `openai` provider cannot be
+   overridden):
 
    ```toml
+   model_provider = "llmprof"
+
    [model_providers.llmprof]
    name = "llmprof"
    base_url = "http://localhost:4000/v1"
+   wire_api = "responses"
+   env_key = "OPENAI_API_KEY"
    ```
 
-   and select that provider. Use an `OPENAI_API_KEY` (API billing) rather than a
-   ChatGPT login, since the login flow talks to a different backend the proxy
-   does not sit in front of.
+   Then run Codex with an `OPENAI_API_KEY` in the environment (API-key auth, not
+   ChatGPT login - the login flow talks to a backend the proxy does not sit in
+   front of):
+
+   ```bash
+   export OPENAI_API_KEY=sk-...
+   codex
+   ```
 
 3. **Open [http://localhost:4000](http://localhost:4000)** and watch each Codex
    request break down by component. The [timeline](../../features/timeline/) view
