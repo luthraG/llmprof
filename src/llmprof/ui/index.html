@@ -72,6 +72,7 @@
   .call-sub { display: flex; justify-content: space-between; margin-top: 4px; font-size: 11.5px; color: var(--faint); }
   .call-sub .num { color: var(--muted); }
   .badge { display: inline-block; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.05em; padding: 1px 6px; border-radius: 5px; background: var(--bg-2); color: var(--muted); border: 1px solid var(--line-2); }
+  .wdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); margin-right: 6px; vertical-align: middle; flex-shrink: 0; }
 
   /* main */
   .main { overflow-y: auto; padding: 24px 28px 60px; }
@@ -189,6 +190,7 @@
         <option value="recent">recent</option>
         <option value="cost">most $</option>
         <option value="tokens">most tokens</option>
+        <option value="waste">needs attention</option>
       </select>
       <select id="modelSel" title="filter by model"><option value="">all models</option></select>
     </div>
@@ -267,10 +269,20 @@ function drawSpark() {
   }).join("");
 }
 
+function hasWaste(t) {
+  const c = t.components || {};
+  const total = t.prompt_tokens || Object.values(c).reduce((a, b) => a + b, 0) || 1;
+  const ts = c["tool schemas"] || 0;
+  const hist = (c["history (assistant)"] || 0) + (c["tool results"] || 0);
+  const prefix = (c["system prompt"] || 0) + ts;
+  return (ts / total >= 0.35) || (hist / total >= 0.4) || (prefix >= 1024 && !t.cached_tokens);
+}
+
 function applyListControls() {
   let list = TRACES.filter(t => !modelFilter || t.model === modelFilter);
   if (sortBy === "cost") list.sort((a,b) => (b.cost_usd||0) - (a.cost_usd||0));
   else if (sortBy === "tokens") list.sort((a,b) => (b.total_tokens||0) - (a.total_tokens||0));
+  else if (sortBy === "waste") list = list.slice().sort((a,b) => (hasWaste(b)-hasWaste(a)) || ((b.cost_usd||0)-(a.cost_usd||0)));
   // recent = keep API order (already newest-first)
   return list;
 }
@@ -299,8 +311,9 @@ function renderCalls() {
     b.className = "call" + (t.id === selectedId ? " active" : "");
     b.onclick = () => select(t.id);
     const top = topComponent(t.components);
+    const wdot = hasWaste(t) ? '<span class="wdot" title="optimization findings"></span>' : '';
     b.innerHTML =
-      `<div class="call-top"><span class="call-model">${esc(t.model || "unknown")}</span>`+
+      `<div class="call-top"><span class="call-model">${wdot}${esc(t.model || "unknown")}</span>`+
       `<span class="call-cost">${money(t.cost_usd)}</span></div>`+
       `<div class="call-sub"><span><span class="num">${fmt(t.total_tokens||0)}</span> tok`+
       `${t.streamed ? ' &middot; <span class="badge">stream</span>' : ''}</span>`+
