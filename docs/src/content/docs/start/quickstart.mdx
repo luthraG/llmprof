@@ -1,0 +1,65 @@
+---
+title: Quickstart
+description: Profile your first LLM call in under a minute.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+The whole idea: change one line in your app (the base URL), keep using your real
+API key, and watch every call show up in the dashboard broken down token by
+token.
+
+<Steps>
+
+1. **Start the proxy.**
+
+   ```bash
+   llmprof up
+   ```
+
+   It listens on `http://localhost:4000` and forwards to OpenAI by default. For
+   Anthropic, point it upstream:
+
+   ```bash
+   llmprof up --upstream https://api.anthropic.com
+   ```
+
+2. **Point your client at it.** Set the base URL to the proxy and leave your API
+   key as-is.
+
+   ```python
+   from openai import OpenAI
+
+   client = OpenAI(base_url="http://localhost:4000/v1")  # your key still works
+   client.chat.completions.create(
+       model="gpt-4o",
+       messages=[
+           {"role": "system", "content": "You are a helpful assistant."},
+           {"role": "user", "content": "Summarize this contract..."},
+       ],
+       tools=[...],
+   )
+   ```
+
+3. **Open the dashboard.** Go to [http://localhost:4000](http://localhost:4000).
+   Your call appears in the list on the left; click it to see the context flame
+   graph, the optimization findings, and how much is reclaimable.
+
+</Steps>
+
+## What you are looking at
+
+- The **flame graph** shows where the prompt tokens went: system prompt, tool
+  schemas (with each tool as a child you can click into), history, and the
+  current input. See [Context flame graph](../../features/flame-graph/).
+- The **optimization** panel lists concrete waste with a per-call reclaimable
+  number. See [The waste detector](../../concepts/waste-detector/).
+- Switch to **trends** and **timeline** at the top for day-over-day usage and
+  per-turn context growth.
+
+## Next
+
+- Using a CLI agent? See [Claude Code](../../integrations/claude-code/) or the
+  [Codex CLI](../../integrations/codex/).
+- Want precise component labels from your own code? Use the
+  [Python SDK](../../sdk/python/).

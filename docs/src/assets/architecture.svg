@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 540" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#5a63e0"/>
+    </marker>
+    <style>
+      .box { fill:#161922; stroke:#2c313d; stroke-width:1.5; rx:12; }
+      .t { fill:#e6e9ef; font-size:15px; font-weight:600; }
+      .sub { fill:#98a1b3; font-size:12px; }
+      .lbl { fill:#7c84ff; font-size:11px; }
+      .edge { stroke:#5a63e0; stroke-width:2; fill:none; marker-end:url(#arrow); }
+      .edge-d { stroke:#39414f; stroke-width:1.5; fill:none; stroke-dasharray:4 4; }
+    </style>
+  </defs>
+  <rect width="920" height="540" fill="#0c0e13"/>
+
+  <!-- your app -->
+  <rect class="box" x="30" y="40" width="180" height="74" rx="12"/>
+  <text class="t" x="50" y="72">your app</text>
+  <text class="sub" x="50" y="94">OpenAI / Anthropic client</text>
+
+  <!-- proxy -->
+  <rect class="box" x="370" y="30" width="190" height="94" rx="12" stroke="#7c84ff"/>
+  <text class="t" x="392" y="64">llmprof proxy</text>
+  <text class="sub" x="392" y="86">FastAPI, streaming-safe</text>
+  <text class="sub" x="392" y="104">forwards your key as-is</text>
+
+  <!-- upstream -->
+  <rect class="box" x="720" y="40" width="170" height="74" rx="12"/>
+  <text class="t" x="740" y="72">provider API</text>
+  <text class="sub" x="740" y="94">OpenAI / Anthropic</text>
+
+  <!-- app -> proxy -->
+  <path class="edge" d="M210,77 L368,77"/>
+  <text class="lbl" x="232" y="68">base_url = localhost:4000</text>
+  <!-- proxy -> upstream -->
+  <path class="edge" d="M560,77 L718,77"/>
+  <text class="lbl" x="600" y="68">forward</text>
+  <!-- upstream -> proxy (response) -->
+  <path class="edge" d="M718,98 L562,98"/>
+  <text class="sub" x="600" y="116">stream back</text>
+
+  <!-- capture branch -->
+  <path class="edge-d" d="M465,124 L465,168"/>
+  <text class="sub" x="478" y="152">capture (off the hot path)</text>
+
+  <!-- three engines -->
+  <rect class="box" x="250" y="178" width="150" height="64" rx="10"/>
+  <text class="t" x="268" y="206" font-size="13">tokenizer</text>
+  <text class="sub" x="268" y="226">tiktoken</text>
+
+  <rect class="box" x="420" y="178" width="170" height="64" rx="10"/>
+  <text class="t" x="438" y="206" font-size="13">attribution</text>
+  <text class="sub" x="438" y="226">by component</text>
+
+  <rect class="box" x="610" y="178" width="150" height="64" rx="10"/>
+  <text class="t" x="628" y="206" font-size="13">pricing</text>
+  <text class="sub" x="628" y="226">100+ models</text>
+
+  <path class="edge-d" d="M325,242 L325,286"/>
+  <path class="edge-d" d="M505,242 L505,286"/>
+  <path class="edge-d" d="M685,242 L505,286"/>
+
+  <!-- store -->
+  <rect class="box" x="350" y="296" width="220" height="64" rx="10" stroke="#3ddc97"/>
+  <text class="t" x="372" y="324" font-size="13">SQLite (local traces)</text>
+  <text class="sub" x="372" y="344">pluggable: BaseStore</text>
+
+  <!-- store -> UI -->
+  <path class="edge" d="M460,360 L460,404"/>
+
+  <!-- UI -->
+  <rect class="box" x="210" y="414" width="500" height="86" rx="12"/>
+  <text class="t" x="234" y="446">local dashboard</text>
+  <text class="sub" x="234" y="470">flame graph · trends · context timeline ·</text>
+  <text class="sub" x="234" y="488">cost leaderboard · waste detector</text>
+
+  <text class="sub" x="30" y="524" fill="#5b6472">Runs fully local. Your prompts never leave the machine.</text>
+</svg>

@@ -1,0 +1,49 @@
+---
+title: Claude Code
+description: Profile Claude Code's token usage by routing it through llmprof.
+---
+
+Claude Code is a heavy context user - long system prompts, tool schemas, and
+growing conversation history. Routing it through llmprof shows exactly where its
+tokens go and how context grows across a session.
+
+## Steps
+
+import { Steps } from '@astrojs/starlight/components';
+
+<Steps>
+
+1. **Start the proxy pointed at Anthropic:**
+
+   ```bash
+   llmprof up --upstream https://api.anthropic.com
+   ```
+
+2. **Tell Claude Code to use the proxy** via `ANTHROPIC_BASE_URL`, then run it as
+   usual:
+
+   ```bash
+   ANTHROPIC_BASE_URL=http://localhost:4000 claude
+   ```
+
+   Your `ANTHROPIC_API_KEY` is sent through to Anthropic unchanged. To make it
+   persistent, export `ANTHROPIC_BASE_URL` in your shell profile.
+
+3. **Open [http://localhost:4000](http://localhost:4000).** Each Claude Code turn
+   appears as a call. Switch to the [timeline](../../features/timeline/) view to
+   watch the context grow turn over turn within a session.
+
+</Steps>
+
+## What to look for
+
+- The **flame graph** reveals how much of each turn is tool schemas vs history.
+- The **timeline** makes context creep visible across a coding session - the
+  history band climbing while the system prompt stays flat.
+- The **waste detector** flags an uncached stable prefix, which for an
+  agent that calls the model repeatedly is often the biggest reclaimable lever.
+
+:::note
+llmprof groups a session's turns automatically by prefix-chaining the messages,
+so a Claude Code session shows up as one run with no extra configuration.
+:::

@@ -1,0 +1,71 @@
+---
+title: llmprof
+description: pprof for your LLM context. See where every token and dollar goes in an LLM call or agent run.
+template: splash
+hero:
+  tagline: pprof for your LLM context. See where every token and dollar goes - system prompt, tool schemas, RAG chunks, history - as a flame graph, and get told what to cut.
+  image:
+    file: ../../assets/logo.svg
+  actions:
+    - text: Quickstart
+      link: ./start/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/luthraG/llmprof
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import flame from '../../assets/screenshots/flame-graph.png';
+
+You profile CPU and memory. Why are you flying blind on the most expensive
+resource in your AI app - the context window?
+
+llmprof is a local, zero-config profiler for LLM calls. Point your client's
+`base_url` at it; it forwards requests to the real provider (your API key passes
+straight through), and on the way it breaks each request's prompt tokens into the
+components that make it up, prices the call, and flags what is wasteful.
+
+<Image src={flame} alt="llmprof dashboard showing a context flame graph, optimization findings, and reclaimable cost for a single call" />
+
+## What you get
+
+<CardGrid>
+  <Card title="Context flame graph" icon="seti:default">
+    One request's tokens broken down by component, with per-tool drill-down. The
+    fat bar is usually the waste.
+  </Card>
+  <Card title="Reclaimable dollars" icon="approve-check">
+    A waste detector that flags duplicated content, unused tool schemas, and
+    uncached prefixes - with a "$X/mo reclaimable" headline.
+  </Card>
+  <Card title="Context timeline" icon="bars">
+    Watch context creep across an agent's turns: history balloons while the
+    system prompt and tools stay flat.
+  </Card>
+  <Card title="Cost leaderboard" icon="list-format">
+    Which prompt template actually drives your bill - grouped by system prompt
+    and tool set, ranked by total cost.
+  </Card>
+</CardGrid>
+
+## 30-second try
+
+```bash
+pipx install llmprof
+llmprof up
+# then point your client at http://localhost:4000/v1 and open http://localhost:4000
+```
+
+Runs fully local. Your prompts never leave the machine. Works with any
+OpenAI- or Anthropic-compatible client, including [Claude Code](./integrations/claude-code/)
+and the [Codex CLI](./integrations/codex/).
+
+## Where to next
+
+- New here? Start with [Installation](./start/installation/) and the [Quickstart](./start/quickstart/).
+- Want the mental model? Read [Architecture](./concepts/architecture/).
+- Profiling from your own code? See the [Python SDK](./sdk/python/).

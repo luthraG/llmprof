@@ -1,0 +1,50 @@
+---
+title: Codex CLI
+description: Profile OpenAI's Codex CLI by pointing it at llmprof.
+---
+
+The Codex CLI talks to an OpenAI-compatible endpoint, so you can route it through
+llmprof the same way as any OpenAI client.
+
+## Steps
+
+import { Steps } from '@astrojs/starlight/components';
+
+<Steps>
+
+1. **Start the proxy** (forwards to OpenAI by default):
+
+   ```bash
+   llmprof up
+   ```
+
+2. **Point Codex at the proxy.** The simplest way is the base-URL environment
+   variable Codex inherits from the OpenAI client:
+
+   ```bash
+   export OPENAI_BASE_URL=http://localhost:4000/v1
+   codex
+   ```
+
+   If you configure providers in `~/.codex/config.toml`, set the base URL there
+   instead:
+
+   ```toml
+   [model_providers.llmprof]
+   name = "llmprof"
+   base_url = "http://localhost:4000/v1"
+   ```
+
+   and select that provider when you run Codex.
+
+3. **Open [http://localhost:4000](http://localhost:4000)** and watch each Codex
+   request break down by component. The [timeline](../../features/timeline/) view
+   shows how a coding session's context grows.
+
+</Steps>
+
+:::tip
+Codex sessions are tool-heavy. The [cost leaderboard](../../features/leaderboard/)
+groups calls by their system-prompt-plus-tools signature, so you can see what the
+agent's recurring call shape actually costs.
+:::
