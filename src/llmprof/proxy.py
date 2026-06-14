@@ -25,7 +25,7 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from . import analyze, pricing, tokens
-from .store import Store
+from .store import open_store
 
 DEFAULT_UPSTREAM = os.environ.get("LLMPROF_UPSTREAM", "https://api.openai.com")
 _SKIP_HEADERS = {"host", "content-length", "connection", "accept-encoding"}
@@ -48,7 +48,7 @@ def create_app(db_path: str | None = None, upstream: str | None = None) -> FastA
     app = FastAPI(title="llmprof", version="0.0.1", lifespan=lifespan)
     app.state.upstream = (upstream or DEFAULT_UPSTREAM).rstrip("/")
     app.state.client = httpx.AsyncClient(timeout=httpx.Timeout(600.0))
-    app.state.store = Store(db_path)
+    app.state.store = open_store(db_path)
 
     @app.get("/llmprof/health")
     async def health() -> dict:

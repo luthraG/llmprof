@@ -1,4 +1,11 @@
-"""SQLite storage for captured traces. Zero-config, single local file."""
+"""Trace storage.
+
+`BaseStore` is the backend contract the rest of llmprof talks to; `SQLiteStore`
+is the default zero-config, single-local-file implementation. Call `open_store()`
+to get a backend: it returns SQLite by default, or dispatches on `LLMPROF_DB_URL`
+(e.g. a `postgresql://...` URL) so a centralized/team backend can be plugged in
+later without touching any call site.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +14,65 @@ import os
 import sqlite3
 import time
 import uuid
+from abc import ABC, abstractmethod
 from pathlib import Path
+
+
+class BaseStore(ABC):
+    """The storage contract every backend implements.
+
+    Methods return plain dict/list structures with JSON already decoded, so the
+    API layer and the SDK never depend on the underlying engine. A new backend
+    (Postgres, a remote service, ...) only has to implement these methods.
+    """
+
+    @abstractmethod
+    def record(self, trace: dict) -> None:
+        """Persist one captured call. Recognized keys: ts, provider, model,
+        endpoint, status, prompt_tokens, completion_tokens, total_tokens,
+        cost_usd, streamed, components, detail, cached_tokens, called_tools,
+        msg_fp, session_hint, route, analysis, reclaimable_usd."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def recent(self, limit: int = 50) -> list[dict]:
+        """Most recent calls, newest first (without the heavy detail blobs)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get(self, trace_id: int) -> dict | None:
+        """One call with its full detail tree and analysis, or None if absent."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def daily_summary(self, days: int = 30) -> list[dict]:
+        """Per-day totals (oldest to newest), for trend charts."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def model_summary(self) -> list[dict]:
+        """Per-model totals, most expensive first."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def sessions(self, limit: int = 50, min_turns: int = 2) -> list[dict]:
+        """Multi-turn runs, most recent first."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def session(self, session_id: str) -> list[dict]:
+        """Every turn of one run, in order, with its per-component breakdown."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def routes(self, limit: int = 15) -> list[dict]:
+        """Most expensive prompt templates, most expensive first."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def reclaimable_summary(self) -> dict:
+        """Total reclaimable spend, projected to a month from the observed rate."""
+        raise NotImplementedError
 
 
 def default_db_path() -> str:
@@ -43,7 +108,9 @@ CREATE TABLE IF NOT EXISTS traces (
 """
 
 
-class Store:
+class SQLiteStore(BaseStore):
+    """Default backend: a single local SQLite file (WAL mode), zero-config."""
+
     def __init__(self, path: str | None = None):
         self.path = path or default_db_path()
         parent = os.path.dirname(self.path)
@@ -267,3 +334,40 @@ class Store:
                    FROM traces GROUP BY model ORDER BY cost DESC""",
             ).fetchall()
         return [dict(r) for r in rows]
+
+
+def _sqlite_path_from_url(url: str) -> str | None:
+    # sqlite:///abs/path -> /abs/path, sqlite://rel.db -> rel.db, sqlite://:memory:
+    rest = url.split("://", 1)[1] if "://" in url else ""
+    return rest or None
+
+
+def open_store(db_path: str | None = None, url: str | None = None) -> BaseStore:
+    """Return a storage backend.
+
+    Defaults to SQLite. If a URL is given (argument or the LLMPROF_DB_URL
+    environment variable) it is dispatched by scheme, so a centralized backend
+    can be swapped in without changing call sites. An explicit URL wins over
+    db_path. Today only sqlite:// is bundled; a postgresql:// URL looks for an
+    optional llmprof._postgres.PostgresStore and errors clearly if it is absent.
+    """
+    url = url or os.environ.get("LLMPROF_DB_URL")
+    if url:
+        scheme = url.split("://", 1)[0].lower() if "://" in url else ""
+        if scheme in ("postgres", "postgresql"):
+            try:
+                from ._postgres import PostgresStore
+            except ImportError as exc:
+                raise RuntimeError(
+                    "LLMPROF_DB_URL points at Postgres, but this build ships no "
+                    "Postgres backend. Provide llmprof._postgres.PostgresStore (a "
+                    "BaseStore implementation), or unset LLMPROF_DB_URL to use SQLite."
+                ) from exc
+            return PostgresStore(url)  # pragma: no cover - no bundled implementation yet
+        if scheme == "sqlite":
+            return SQLiteStore(_sqlite_path_from_url(url))
+    return SQLiteStore(db_path)
+
+
+# Backward-compatible alias: the default backend is SQLite.
+Store = SQLiteStore

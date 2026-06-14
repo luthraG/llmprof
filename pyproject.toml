@@ -55,4 +55,4 @@ addopts = "--cov=llmprof --cov-report=term-missing --cov-fail-under=90"
 source = ["llmprof"]
 
 [tool.coverage.report]
-exclude_lines = ["pragma: no cover", "if __name__ == .__main__.:"]
+exclude_lines = ["pragma: no cover", "if __name__ == .__main__.:", "raise NotImplementedError"]

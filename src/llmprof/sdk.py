@@ -33,11 +33,11 @@ import json
 import time
 
 from . import analyze, pricing, tokens
-from .store import Store
+from .store import BaseStore, open_store
 
 # active profiles, innermost last (so nesting and the decorator both work)
 _stack: contextvars.ContextVar[tuple] = contextvars.ContextVar("llmprof_profiles", default=())
-_default_store: Store | None = None
+_default_store: BaseStore | None = None
 
 # friendly aliases -> the canonical component buckets the dashboard colors
 _ALIASES = {
@@ -58,14 +58,14 @@ def _text_of(content) -> str:
     return json.dumps(content, ensure_ascii=False, default=str)
 
 
-def _get_store(store, db_path) -> Store:
+def _get_store(store, db_path) -> BaseStore:
     global _default_store
     if store is not None:
         return store
     if db_path is not None:
-        return Store(db_path)
+        return open_store(db_path)
     if _default_store is None:
-        _default_store = Store()
+        _default_store = open_store()
     return _default_store
 
 
@@ -74,7 +74,7 @@ class Profile:
     usage(), and the trace is recorded when the context manager exits."""
 
     def __init__(self, model: str = "gpt-4o", provider: str = "openai", *,
-                 store: Store | None = None, db_path: str | None = None,
+                 store: BaseStore | None = None, db_path: str | None = None,
                  session: str | None = None):
         self.model = model
         self.provider = provider

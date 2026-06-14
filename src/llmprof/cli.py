@@ -10,7 +10,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from . import __version__
-from .store import Store
+from .store import open_store
 
 app = typer.Typer(add_completion=False, help="pprof for your LLM context.")
 console = Console()
@@ -69,7 +69,7 @@ def up(
 @app.command()
 def traces(limit: int = typer.Option(20, help="How many recent calls to show.")):
     """Show recent captured calls with token + cost breakdown."""
-    rows = Store().recent(limit)
+    rows = open_store().recent(limit)
     if not rows:
         console.print(
             "[yellow]No traces yet.[/] Start the proxy with "
