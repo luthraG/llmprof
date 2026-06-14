@@ -86,10 +86,10 @@ Then open the dashboard, or `llmprof traces` for a terminal summary. Full docs:
 
 ## Works with
 
-- **Any OpenAI-compatible API** via `/v1/chat/completions` (OpenAI, Azure, Groq,
-  Together, OpenRouter, DeepSeek, Fireworks, Gemini's OpenAI endpoint, local
-  Ollama / vLLM). Point the proxy at it with `--upstream`.
-- **Anthropic** via `/v1/messages`.
+- **Any OpenAI-compatible API** via `/v1/chat/completions` and `/v1/responses`.
+  Defaults to OpenAI; to use another (Azure, Groq, Together, OpenRouter, DeepSeek,
+  Fireworks, Gemini's OpenAI endpoint, local Ollama / vLLM) set `--upstream`.
+- **Anthropic** via `/v1/messages` (auto-routed, no flag needed).
 - **[Claude Code](https://luthrag.github.io/llmprof/integrations/claude-code/)**
   and the **[Codex CLI](https://luthrag.github.io/llmprof/integrations/codex/)** -
   set their base URL to the proxy.
