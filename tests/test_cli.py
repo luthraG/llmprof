@@ -4,8 +4,36 @@ import uvicorn
 from typer.testing import CliRunner
 
 from llmprof.cli import _port_available, app
+from llmprof.store import Store
 
 runner = CliRunner()
+
+
+def test_traces_command_with_data(monkeypatch, tmp_path):
+    monkeypatch.setenv("LLMPROF_HOME", str(tmp_path))
+    Store().record(
+        {
+            "provider": "openai", "model": "gpt-4o",
+            "prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110,
+            "cost_usd": 0.0012, "components": {"system prompt": 80, "tool schemas": 20},
+        }
+    )
+    result = runner.invoke(app, ["traces"])
+    assert result.exit_code == 0
+    assert "gpt-4o" in result.output
+
+
+def test_traces_command_empty(monkeypatch, tmp_path):
+    monkeypatch.setenv("LLMPROF_HOME", str(tmp_path))
+    result = runner.invoke(app, ["traces"])
+    assert result.exit_code == 0
+    assert "No traces" in result.output
+
+
+def test_version_command():
+    result = runner.invoke(app, ["version"])
+    assert result.exit_code == 0
+    assert "llmprof" in result.output
 
 
 def _free_port() -> int:

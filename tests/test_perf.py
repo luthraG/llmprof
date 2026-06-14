@@ -15,6 +15,7 @@ from httpx import ASGITransport
 
 from llmprof import tokens
 from llmprof.proxy import create_app
+from llmprof.store import Store
 
 
 def _big_payload(n_messages: int = 40) -> dict:
@@ -58,8 +59,62 @@ def test_attribution_latency():
     print(f"\nattribution: {per_call * 1000:.2f} ms/call for a ~{warm['total']}-token request")
 
 
+def test_traces_read_perf(tmp_path):
+    """The dashboard polls recent() frequently; it must stay fast as rows grow."""
+    st = Store(str(tmp_path / "big.db"))
+    detail = {"name": "context", "tokens": 100,
+              "children": [{"name": "system prompt", "tokens": 80, "children": []}]}
+    for _ in range(500):
+        st.record({
+            "provider": "openai", "model": "gpt-4o", "prompt_tokens": 100,
+            "completion_tokens": 10, "total_tokens": 110, "cost_usd": 0.001,
+            "components": {"system prompt": 80}, "detail": detail,
+        })
+    t0 = time.perf_counter()
+    rows = st.recent(100)
+    dt = time.perf_counter() - t0
+    assert len(rows) == 100
+    assert dt < 0.5, f"recent(100) too slow over 500 rows: {dt * 1000:.1f} ms"
+    print(f"\ntraces read: recent(100) over 500 rows in {dt * 1000:.1f} ms")
+
+
 def test_proxy_handles_concurrent_load(tmp_path):
     asyncio.run(_run_load(tmp_path, requests=100))
+
+
+def test_proxy_handles_concurrent_streaming(tmp_path):
+    asyncio.run(_run_stream_load(tmp_path, requests=60))
+
+
+async def _run_stream_load(tmp_path, requests: int) -> None:
+    sse = b'data: {"choices":[{"delta":{"content":"hello there"}}]}\n\ndata: [DONE]\n\n'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        async def body():
+            yield sse
+
+        return httpx.Response(200, content=body())
+
+    app = create_app(db_path=str(tmp_path / "sl.db"), upstream="http://mock")
+    app.state.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    payload = {"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}], "stream": True}
+    transport = ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://app") as client:
+        t0 = time.perf_counter()
+        responses = await asyncio.gather(
+            *[client.post("/v1/chat/completions", json=payload) for _ in range(requests)]
+        )
+        elapsed = time.perf_counter() - t0
+        assert all(r.status_code == 200 for r in responses)
+        for _ in range(60):
+            if len(app.state.store.recent(requests + 10)) >= requests:
+                break
+            await asyncio.sleep(0.05)
+
+    rows = app.state.store.recent(requests + 10)
+    assert len(rows) == requests, f"recorded {len(rows)}/{requests} streamed traces"
+    assert all(r["streamed"] == 1 for r in rows)
+    print(f"\nstreaming load: {requests} concurrent streams in {elapsed * 1000:.0f} ms")
 
 
 async def _run_load(tmp_path, requests: int) -> None:

@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.5"]
+dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.5"]
 
 [project.urls]
 Homepage = "https://github.com/luthraG/llmprof"
@@ -39,6 +39,7 @@ llmprof = "llmprof.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/llmprof"]
+artifacts = ["src/llmprof/ui/*.html"]
 
 [tool.ruff]
 line-length = 100
@@ -46,3 +47,12 @@ target-version = "py39"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=llmprof --cov-report=term-missing --cov-fail-under=90"
+
+[tool.coverage.run]
+source = ["llmprof"]
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "if __name__ == .__main__.:"]
