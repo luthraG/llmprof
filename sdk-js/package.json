@@ -1,0 +1,34 @@
+{
+  "name": "@llmprof/sdk",
+  "version": "0.0.1",
+  "description": "JavaScript/TypeScript SDK for llmprof - label your LLM context components (RAG, tools, history) for precise token attribution.",
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": ["llm", "tokens", "profiler", "openai", "anthropic", "rag", "cost"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/luthraG/llmprof.git",
+    "directory": "sdk-js"
+  },
+  "homepage": "https://luthrag.github.io/llmprof",
+  "license": "MIT",
+  "author": "Gaurav Luthra"
+}

@@ -196,6 +196,45 @@ def test_api_session_404(tmp_path):
     assert client.get("/llmprof/api/sessions/nope").status_code == 404
 
 
+def test_api_ingest_records_labeled_components(tmp_path):
+    """The ingest endpoint (used by the JS SDK) builds the same breakdown,
+    analysis, and pricing as the Python SDK from labeled components."""
+    client = _client(tmp_path, "ing.db")
+    body = {
+        "model": "gpt-4o",
+        "provider": "openai",
+        "components": [
+            {"component": "system prompt", "text": "You are a helpful assistant. " * 10},
+            {"component": "rag_chunk", "name": "kb#42", "text": "retrieved doc " * 50},
+            {"component": "tool", "name": "search",
+             "text": '{"name":"search","description":"search the web"}', "called": True},
+            {"component": "tool", "name": "unused_tool",
+             "text": '{"name":"unused_tool","description":"never called here"}'},
+        ],
+        "usage": {"prompt_tokens": 1234, "completion_tokens": 56},
+    }
+    r = client.post("/llmprof/api/ingest", json=body)
+    assert r.status_code == 200 and r.json()["ok"] is True
+
+    tid = client.get("/llmprof/api/traces").json()["traces"][0]["id"]
+    detail = client.get(f"/llmprof/api/traces/{tid}").json()
+    assert detail["prompt_tokens"] == 1234 and detail["cost_usd"] > 0
+    names = [c["name"] for c in detail["detail"]["children"]]
+    assert "system prompt" in names and "rag chunks" in names and "tool schemas" in names
+    rag = next(c for c in detail["detail"]["children"] if c["name"] == "rag chunks")
+    assert any(c["name"] == "kb#42" for c in rag["children"])
+    # the unused tool is detected as waste, just like a proxied call
+    assert detail["analysis"]["findings"]
+    assert any("not called" in f["title"] for f in detail["analysis"]["findings"])
+
+
+def test_api_ingest_rejects_bad_json(tmp_path):
+    client = _client(tmp_path, "ing2.db")
+    r = client.post("/llmprof/api/ingest", content=b"not json",
+                    headers={"content-type": "application/json"})
+    assert r.status_code == 400
+
+
 def test_passthrough_proxies_other_paths(tmp_path):
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v1/models"

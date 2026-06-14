@@ -24,7 +24,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
-from . import analyze, pricing, tokens
+from . import analyze, ingest, pricing, tokens
 from .store import open_store
 
 DEFAULT_UPSTREAM = os.environ.get("LLMPROF_UPSTREAM", "https://api.openai.com")
@@ -79,6 +79,25 @@ def create_app(db_path: str | None = None, upstream: str | None = None) -> FastA
             "routes": app.state.store.routes(),
             "reclaimable": app.state.store.reclaimable_summary(),
         }
+
+    @app.post("/llmprof/api/ingest")
+    async def api_ingest(request: Request) -> dict:
+        """Record a trace from labeled components. Used by the JS/TS SDK and any
+        non-Python client; the heavy lifting (tokenizing, attribution, waste
+        analysis, pricing) happens here so every SDK produces identical results."""
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="invalid JSON body") from exc
+        model = body.get("model") or "gpt-4o"
+        entries, called = ingest.normalize_items(body.get("components"), model)
+        trace = ingest.build_trace(
+            model, body.get("provider") or "openai", entries, called,
+            usage=ingest.normalize_usage(body.get("usage")),
+            session=body.get("session"), started=body.get("ts"),
+        )
+        await run_in_threadpool(app.state.store.record, trace)
+        return {"ok": True, "reclaimable_usd": trace["reclaimable_usd"]}
 
     @app.get("/llmprof/api/sessions")
     async def api_sessions() -> dict:

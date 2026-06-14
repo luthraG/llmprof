@@ -29,33 +29,14 @@ from __future__ import annotations
 
 import contextvars
 import functools
-import json
 import time
 
-from . import analyze, pricing, tokens
+from . import ingest, tokens
 from .store import BaseStore, open_store
 
 # active profiles, innermost last (so nesting and the decorator both work)
 _stack: contextvars.ContextVar[tuple] = contextvars.ContextVar("llmprof_profiles", default=())
 _default_store: BaseStore | None = None
-
-# friendly aliases -> the canonical component buckets the dashboard colors
-_ALIASES = {
-    "system": "system prompt", "system_prompt": "system prompt",
-    "user": "user input", "input": "user input",
-    "history": "history (assistant)", "assistant": "history (assistant)",
-    "tool": "tool schemas", "tools": "tool schemas", "tool_schema": "tool schemas",
-    "rag": "rag chunks", "rag_chunk": "rag chunks", "retrieved": "rag chunks",
-    "tool_result": "tool results", "tool_results": "tool results",
-}
-# components whose entries become named drill-down children in the flame graph
-_NAMED_PARENTS = {"tool schemas", "rag chunks"}
-
-
-def _text_of(content) -> str:
-    if isinstance(content, str):
-        return content
-    return json.dumps(content, ensure_ascii=False, default=str)
 
 
 def _get_store(store, db_path) -> BaseStore:
@@ -89,8 +70,8 @@ class Profile:
     def add(self, component: str, content, *, name: str | None = None,
             label: str | None = None, called: bool = False) -> int:
         """Tag a component. Returns the token count of the content added."""
-        comp = _ALIASES.get(component, component)
-        text = _text_of(content)
+        comp = ingest.ALIASES.get(component, component)
+        text = ingest.text_of(content)
         toks = tokens.count_tokens(text, self.model)
         item = name or label
         self._entries.append((comp, item, toks, text))
@@ -105,39 +86,14 @@ class Profile:
     def usage(self, usage=None, *, prompt_tokens: int | None = None,
               completion_tokens: int | None = None, cached_tokens: int | None = None) -> None:
         """Set exact token usage from a provider usage object/dict, or explicitly."""
-        if usage is not None:
-            def g(key):
-                return usage.get(key) if isinstance(usage, dict) else getattr(usage, key, None)
-            if prompt_tokens is None:
-                prompt_tokens = g("prompt_tokens") or g("input_tokens")
-            if completion_tokens is None:
-                completion_tokens = g("completion_tokens") or g("output_tokens")
-            if cached_tokens is None:
-                cached_tokens = g("cache_read_input_tokens")
-                det = g("prompt_tokens_details")
-                if cached_tokens is None and isinstance(det, dict):
-                    cached_tokens = det.get("cached_tokens")
+        merged = ingest.normalize_usage(usage)
         if prompt_tokens is not None:
-            self._usage["prompt"] = prompt_tokens
+            merged["prompt"] = prompt_tokens
         if completion_tokens is not None:
-            self._usage["completion"] = completion_tokens
+            merged["completion"] = completion_tokens
         if cached_tokens is not None:
-            self._usage["cached"] = cached_tokens
-
-    def _tree(self):
-        order: list[str] = []
-        nodes: dict[str, dict] = {}
-        for comp, name, toks, _ in self._entries:
-            if comp not in nodes:
-                nodes[comp] = {"name": comp, "tokens": 0, "children": []}
-                order.append(comp)
-            nodes[comp]["tokens"] += toks
-            if name and comp in _NAMED_PARENTS:
-                nodes[comp]["children"].append({"name": name, "tokens": toks, "children": []})
-        children = [nodes[c] for c in order]
-        total = sum(n["tokens"] for n in children)
-        tree = {"name": "context", "tokens": total, "children": children}
-        return tree, {c: nodes[c]["tokens"] for c in order}
+            merged["cached"] = cached_tokens
+        self._usage.update(merged)
 
     def __enter__(self) -> Profile:
         _stack.set(_stack.get() + (self,))
@@ -156,26 +112,12 @@ class Profile:
         if self._recorded:
             return
         self._recorded = True
-        tree, components = self._tree()
-        prompt = self._usage["prompt"] if self._usage["prompt"] is not None else tree["tokens"]
-        completion = self._usage["completion"] or 0
-        cached = self._usage["cached"]
-        rate = pricing.rates(self.model)
-        ana = analyze.analyze(
-            tree, [e[3] for e in self._entries], input_per_1k=rate[0] if rate else None,
-            cached_tokens=cached, called_tools=self._called or None, model=self.model,
+        usage = {k: v for k, v in self._usage.items() if v is not None}
+        trace = ingest.build_trace(
+            self.model, self.provider, self._entries, self._called,
+            usage=usage, session=self.session, started=self._started,
         )
-        self._store.record({
-            "ts": self._started, "provider": self.provider, "model": self.model,
-            "endpoint": "sdk", "status": 200,
-            "prompt_tokens": prompt, "completion_tokens": completion,
-            "total_tokens": (prompt or 0) + (completion or 0),
-            "cost_usd": pricing.cost(self.model, prompt or 0, completion or 0),
-            "streamed": False, "components": components, "detail": tree,
-            "cached_tokens": cached, "called_tools": self._called,
-            "session_hint": self.session,
-            "analysis": ana, "reclaimable_usd": ana["reclaimable_usd"],
-        })
+        self._store.record(trace)
 
 
 def profile(model: str = "gpt-4o", provider: str = "openai", **kwargs) -> Profile:

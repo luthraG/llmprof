@@ -23,7 +23,7 @@ jobs:
       - name: Test
         run: pytest -q
 
-  launcher:
+  node:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,3 +33,6 @@ jobs:
       - name: Test the npx launcher
         run: node --test
         working-directory: launcher
+      - name: Test the JS/TS SDK
+        run: node --test
+        working-directory: sdk-js
