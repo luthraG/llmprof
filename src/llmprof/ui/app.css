@@ -95,6 +95,7 @@
   .insight .num { color: var(--amber); }
   .panel { background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin-bottom: 18px; }
   .panel-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--faint); margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; }
+  .empty-note { color: var(--muted); font-size: 13px; padding: 18px 4px; text-align: center; font-family: var(--mono); }
   .crumbs { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 12px; text-transform: none; letter-spacing: 0; }
   .crumb { color: var(--muted); cursor: pointer; padding: 2px 6px; border-radius: 5px; }
   .crumb:hover { background: var(--bg-2); color: var(--text); }

@@ -59,6 +59,28 @@ def test_static_assets_served(tmp_path):
     js = client.get("/llmprof/app.js")
     assert js.status_code == 200
     assert "javascript" in js.headers["content-type"]
+    # the flame graph and breakdown degrade to a note instead of a blank panel
+    assert "empty-note" in js.text
+    assert ".empty-note" in css.text
+
+
+def test_empty_breakdown_served(tmp_path):
+    """A request with no messages/tools yields a childless tree; the API must
+    still serve it (the UI then shows the empty-state note instead of a blank)."""
+    app = create_app(db_path=str(tmp_path / "e.db"), upstream="http://mock")
+    app.state.client = httpx.AsyncClient(
+        transport=_mock(
+            {
+                "choices": [{"message": {"content": "ok"}}],
+                "usage": {"prompt_tokens": 0, "completion_tokens": 2, "total_tokens": 2},
+            }
+        )
+    )
+    client = TestClient(app)
+    client.post("/v1/chat/completions", json={"model": "gpt-4o", "messages": []})
+    tid = client.get("/llmprof/api/traces").json()["traces"][0]["id"]
+    detail = client.get(f"/llmprof/api/traces/{tid}").json()
+    assert detail["detail"]["children"] == []
 
 
 def test_api_traces_list_and_detail(tmp_path):

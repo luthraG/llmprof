@@ -408,6 +408,10 @@ function redraw() {
   const focus = focusPath[focusPath.length-1] || CURRENT_TREE;
   drawCrumbs();
   const host = $("#flame");
+  if (!focus || !(focus.tokens > 0) || !(focus.children && focus.children.length)) {
+    host.innerHTML = `<div class="empty-note">No token breakdown was captured for this call.</div>`;
+    return;
+  }
   const W = host.clientWidth || 900;
   const ROW = 30, GAP = 2, PAD = 0;
   const NS = "http://www.w3.org/2000/svg";
@@ -495,6 +499,10 @@ function drawLegend(tree) {
   const total = tree.tokens || 1;
   const inP = CURRENT_TRACE && CURRENT_TRACE.input_per_1k;
   const items = [...(tree.children||[])].sort((a,b)=>b.tokens-a.tokens);
+  if (!items.length) {
+    el.innerHTML = `<div class="empty-note">No breakdown available for this call.</div>`;
+    return;
+  }
   for (const n of items) {
     const row = document.createElement("div");
     row.className = "leg";
