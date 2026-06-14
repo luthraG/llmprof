@@ -157,38 +157,59 @@ class SQLiteStore(BaseStore):
                 "CREATE INDEX IF NOT EXISTS idx_traces_session ON traces (session_id)"
             )
 
-    def _resolve_session(self, conn, fp: list, hint: str | None) -> tuple[str, int]:
+    # a run is also grouped if calls share a conversation root (system prompt +
+    # first user message) within this window, even when their middle context
+    # diverges. Real agents (Claude Code, Codex) mutate earlier context between
+    # calls, so a strict-prefix chain alone misses them.
+    _ROOT_WINDOW_S = 6 * 3600
+
+    def _next_turn(self, conn, session_id: str) -> int:
+        row = conn.execute(
+            "SELECT COALESCE(MAX(turn), 0) FROM traces WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        return (row[0] or 0) + 1
+
+    def _resolve_session(self, conn, fp: list, hint: str | None,
+                         ts: float | None) -> tuple[str, int]:
         """Assign (session_id, turn) for a call.
 
-        An explicit hint (the x-llmprof-session header) wins. Otherwise we chain
-        by prefix: the most recent prior call whose fingerprint is a strict
-        prefix of this one is the previous turn of the same run, so we inherit
-        its session and increment the turn. No match starts a fresh run.
+        An explicit hint (the x-llmprof-session header) wins. Otherwise we look
+        for the previous turn of the same run: first by strict prefix (the most
+        precise signal), then, failing that, by a shared conversation root within
+        a time window (tolerant of mutated middle context). No match = new run.
         """
         if hint:
-            row = conn.execute(
-                "SELECT COALESCE(MAX(turn), 0) FROM traces WHERE session_id = ?", (hint,)
-            ).fetchone()
-            return hint, (row[0] or 0) + 1
-        if fp:
-            rows = conn.execute(
-                "SELECT session_id, turn, msg_fp FROM traces "
-                "WHERE msg_fp IS NOT NULL ORDER BY id DESC LIMIT 200"
-            ).fetchall()
-            best = None  # (prefix_len, session_id, turn)
-            for r in rows:
-                prior = json.loads(r["msg_fp"]) if r["msg_fp"] else []
-                n = len(prior)
-                if 0 < n < len(fp) and fp[:n] == prior and (best is None or n > best[0]):
-                    best = (n, r["session_id"], r["turn"])
-            if best:
-                return best[1], (best[2] or 1) + 1
-        return uuid.uuid4().hex[:12], 1
+            return hint, self._next_turn(conn, hint)
+        if not fp:
+            return uuid.uuid4().hex[:12], 1
+
+        rows = conn.execute(
+            "SELECT session_id, msg_fp, ts FROM traces "
+            "WHERE msg_fp IS NOT NULL ORDER BY id DESC LIMIT 300"
+        ).fetchall()
+        root = fp[:2]  # system prompt + first user message: stable across a run
+        best_prefix = None  # (prefix_len, session_id)
+        root_session = None  # most recent run sharing the root, within the window
+        for r in rows:
+            prior = json.loads(r["msg_fp"]) if r["msg_fp"] else []
+            n = len(prior)
+            if 0 < n < len(fp) and fp[:n] == prior and (best_prefix is None or n > best_prefix[0]):
+                best_prefix = (n, r["session_id"])
+            if root_session is None and len(prior) >= len(root) and prior[:len(root)] == root:
+                if ts is None or r["ts"] is None or (ts - r["ts"]) <= self._ROOT_WINDOW_S:
+                    root_session = r["session_id"]
+
+        session_id = best_prefix[1] if best_prefix else root_session
+        if not session_id:
+            return uuid.uuid4().hex[:12], 1
+        return session_id, self._next_turn(conn, session_id)
 
     def record(self, trace: dict) -> None:
         fp = trace.get("msg_fp") or []
         with self._connect() as conn:
-            session_id, turn = self._resolve_session(conn, fp, trace.get("session_hint"))
+            session_id, turn = self._resolve_session(
+                conn, fp, trace.get("session_hint"), trace.get("ts", time.time())
+            )
             conn.execute(
                 """INSERT INTO traces
                    (ts, provider, model, endpoint, status, prompt_tokens,

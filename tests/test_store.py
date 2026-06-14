@@ -67,6 +67,26 @@ def test_reclaimable_projection_is_gated(tmp_path):
     assert big["monthly_reclaimable_usd"] is not None and big["monthly_calls"] > 0
 
 
+def test_session_groups_despite_mutated_middle_context(tmp_path):
+    """Agents (Claude Code, Codex) mutate earlier context between calls, so a
+    strict prefix chain misses them. Calls sharing a conversation root still group."""
+    st = SQLiteStore(str(tmp_path / "agent.db"))
+    base = {"provider": "anthropic", "model": "claude-opus-4-8",
+            "prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110, "cost_usd": 0.01}
+    # same root (system + first user) but the middle diverges -> NOT a strict prefix
+    st.record({**base, "msg_fp": ["s:sys", "u:q1", "a:X1"]})
+    st.record({**base, "msg_fp": ["s:sys", "u:q1", "a:X2", "u:q2"]})
+    st.record({**base, "msg_fp": ["s:sys", "u:q1", "a:X2", "u:q2", "a:Y", "u:q3"]})
+    # a different conversation (different first user message) is its own run
+    st.record({**base, "msg_fp": ["s:sys", "u:other"]})
+
+    sessions = st.sessions(min_turns=2)
+    assert len(sessions) == 1, "the three same-root calls should be one run"
+    assert sessions[0]["turns"] == 3
+    turns = st.session(sessions[0]["session_id"])
+    assert [t["turn"] for t in turns] == [1, 2, 3]
+
+
 def test_postgres_url_errors_clearly_until_backend_exists():
     # the door is open: a postgres URL is recognized and routed, and fails with
     # a clear message instead of silently falling back to SQLite.
