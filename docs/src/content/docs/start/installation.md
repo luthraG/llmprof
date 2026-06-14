@@ -16,6 +16,28 @@ pipx install llmprof
 llmprof up
 ```
 
+## npx (no Python needed)
+
+Not a Python shop? Run llmprof straight from npm - no Python, pip, or virtualenv
+required:
+
+```bash
+npx llmprof up
+```
+
+The launcher bootstraps [`uv`](https://github.com/astral-sh/uv) (a single static
+binary that provisions its own Python) and runs the real llmprof package. The
+first run downloads `uv` once and caches it under `~/.cache/llmprof`; every
+argument is forwarded, so `npx llmprof traces` and `npx llmprof up --port 4100`
+work as expected.
+
+Useful environment overrides:
+
+- `LLMPROF_SPEC` - the package spec to run (default `llmprof==<launcher version>`);
+  point it at a path or `git+https://...` URL for a dev build.
+- `LLMPROF_CACHE_DIR` - where the `uv` binary is cached.
+- `LLMPROF_UV` - path to an existing `uv` binary to use directly.
+
 ## pip
 
 If you would rather install into the current environment (for example to use the

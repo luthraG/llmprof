@@ -14,14 +14,14 @@ description: What llmprof does today and what is coming next.
 - **Python SDK** for precise, in-code component labels.
 - **Pluggable storage** (SQLite default; backend abstraction for a centralized
   database).
+- **`npx llmprof` launcher** - run the proxy with no Python install. See
+  [Installation](../../start/installation/#npx-no-python-needed).
 
 ## Next
 
-- **README + demo GIF** - a 15-second above-the-fold demo of the flow.
-- **`npx llmprof` launcher** - run the proxy with no Python install, for
-  JS/TS-first teams.
 - **JavaScript / TypeScript SDK** - the same component-labeling API as Python
   (`rag`, `tool`, `step` labels).
+- **README + demo GIF** - a 15-second above-the-fold demo of the flow.
 - **Postgres backend** - a shared/team dashboard on the existing store
   abstraction.
 - **Hosted live demo** - try it without installing anything.
