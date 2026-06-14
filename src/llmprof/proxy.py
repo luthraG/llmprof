@@ -20,6 +20,8 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from . import pricing, tokens
 from .store import Store
@@ -151,7 +153,6 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
         payload = {}
 
     model = payload.get("model", "")
-    breakdown = _attribute(payload, provider)
     headers = _forward_headers(request)
     url = app.state.upstream + endpoint
     started = time.time()
@@ -168,14 +169,11 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
                 yield chunk
                 scrape(chunk, state)
             await upstream.aclose()
-            prompt_tokens = state["input"] if state["input"] is not None else breakdown["total"]
-            completion_tokens = (
-                state["output"]
-                if state["output"] is not None
-                else tokens.count_tokens("".join(state["text"]), model)
+            # tokenization runs in a threadpool after the stream, off the loop
+            await run_in_threadpool(
+                _record_blocking, app, provider, model, payload,
+                state["input"], state["output"], "".join(state["text"]), status, started, True,
             )
-            _record(app, provider, model, breakdown, prompt_tokens, completion_tokens, status,
-                    started, True)
 
         return StreamingResponse(
             gen(),
@@ -185,22 +183,32 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
 
     upstream = await app.state.client.post(url, content=body, headers=headers)
     data = upstream.content
-    prompt_tokens, completion_tokens = _usage_from_body(data, provider)
-    if prompt_tokens is None:
-        prompt_tokens = breakdown["total"]
-    if completion_tokens is None:
-        completion_tokens = 0
-    _record(app, provider, model, breakdown, prompt_tokens, completion_tokens,
-            upstream.status_code, started, False)
+    usage_in, usage_out = _usage_from_body(data, provider)
+    # forward immediately; attribute + record in the background so the proxy adds
+    # essentially no latency to the proxied call.
+    record = BackgroundTask(
+        _record_blocking, app, provider, model, payload,
+        usage_in, usage_out, None, upstream.status_code, started, False,
+    )
     return Response(
         content=data,
         status_code=upstream.status_code,
         media_type=upstream.headers.get("content-type", "application/json"),
+        background=record,
     )
 
 
-def _record(app, provider, model, breakdown, prompt_tokens, completion_tokens, status,
-            started, streamed):
+def _record_blocking(app, provider, model, payload, usage_in, usage_out, completion_text,
+                     status, started, streamed):
+    """All the CPU work (tokenization + attribution) and the DB write. Runs in a
+    threadpool / background task so it never blocks the proxied request."""
+    breakdown = _attribute(payload, provider)
+    prompt_tokens = usage_in if usage_in is not None else breakdown["total"]
+    completion_tokens = (
+        usage_out
+        if usage_out is not None
+        else tokens.count_tokens(completion_text or "", model)
+    )
     total = (prompt_tokens or 0) + (completion_tokens or 0)
     app.state.store.record(
         {
