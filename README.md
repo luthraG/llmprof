@@ -7,6 +7,7 @@
   <img src="https://img.shields.io/badge/python-3.9%2B-blue" alt="Python 3.9+">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   <a href="https://luthrag.github.io/llmprof"><img src="https://img.shields.io/badge/docs-llmprof.dev-7c84ff" alt="Docs"></a>
+  <img src="https://img.shields.io/badge/100%25_local-prompts_never_leave_your_machine-3ddc97" alt="100% local">
 </p>
 
 <p align="center">
@@ -27,8 +28,13 @@ pipx install llmprof && llmprof up      # or, no Python:  npx llmprof up
 ```
 
 Point your client's base URL at `http://localhost:4000/v1` (your API key passes
-straight through) and open `http://localhost:4000`. Everything runs locally; your
-prompts and keys never leave the machine.
+straight through) and open `http://localhost:4000`.
+
+> **Private by design.** llmprof is fully self-hosted: it runs on your machine
+> (or your own server), and your prompts, completions, and API keys are only ever
+> sent to the upstream provider you already use. Nothing is sent to llmprof, a
+> third party, or any cloud. The trace database is a local file you own. Safe to
+> run against production traffic and client data with no new data-sharing concerns.
 
 ## What you see
 
