@@ -65,6 +65,9 @@ def create_app(db_path: str | None = None, upstream: str | None = None) -> FastA
         trace = app.state.store.get(trace_id)
         if trace is None:
             raise HTTPException(status_code=404, detail="trace not found")
+        rate = pricing.rates(trace.get("model"))
+        trace["input_per_1k"] = rate[0] if rate else None
+        trace["output_per_1k"] = rate[1] if rate else None
         return trace
 
     @app.post("/v1/chat/completions")

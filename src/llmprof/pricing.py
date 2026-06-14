@@ -80,6 +80,11 @@ def _match(model: str | None) -> tuple[float, float] | None:
     return None
 
 
+def rates(model: str | None) -> tuple[float, float] | None:
+    """(input_per_1k, output_per_1k) for a model, or None if unknown."""
+    return _match(model)
+
+
 def cost(model: str | None, prompt_tokens: int, completion_tokens: int) -> float | None:
     """Estimated USD cost, or None if the model's pricing is unknown."""
     price = _match(model)
