@@ -165,6 +165,25 @@ def test_pricing_known_and_unknown():
     assert pricing.cost("some-unknown-model", 1000, 1000) is None
 
 
+def test_responses_to_chat_adapter():
+    payload = {
+        "model": "gpt-5.4", "instructions": "You are a careful assistant. " * 4,
+        "input": [
+            {"role": "user", "content": [{"type": "input_text", "text": "summarize this please"}]},
+            {"type": "function_call", "name": "search", "arguments": "{}"},
+            {"type": "function_call_output", "output": "a result"},
+        ],
+        "tools": [{"type": "function", "name": "search", "description": "d", "parameters": {}}],
+    }
+    chat = tokens.responses_to_chat(payload)
+    assert chat["messages"][0]["role"] == "system" and "careful" in chat["messages"][0]["content"]
+    assert any(m["role"] == "user" and "summarize" in m["content"] for m in chat["messages"])
+    assert chat["tools"][0]["function"]["name"] == "search"  # flattened into chat tool shape
+    # the standard openai attribution works on the adapted payload
+    b = tokens.attribute_openai(chat["messages"], chat["tools"], "gpt-5.4")
+    assert b["components"]["system prompt"] > 0 and "tool schemas" in b["components"]
+
+
 def test_cost_cached_matches_a_real_anthropic_bill():
     # the exact token split from a Claude Code /usage readout (opus-4-8, $5/$25 per 1M):
     # 704 fresh input, 85.7k cache read (0.1x), 7.6k cache write (1.25x), 2.8k output

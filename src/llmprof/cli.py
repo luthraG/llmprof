@@ -33,11 +33,16 @@ def up(
     port: int = typer.Option(4000, "--port", envvar="LLMPROF_PORT", help="Port to bind."),
     upstream: str = typer.Option(
         None, "--upstream", envvar="LLMPROF_UPSTREAM",
-        help="Upstream API base URL (default: OpenAI). Point this at any "
-        "OpenAI-compatible provider, or https://api.anthropic.com.",
+        help="OpenAI-compatible upstream base URL (default: OpenAI). Point this "
+        "at any OpenAI-compatible provider (Groq, Together, ...).",
+    ),
+    anthropic_upstream: str = typer.Option(
+        None, "--anthropic-upstream", envvar="LLMPROF_ANTHROPIC_UPSTREAM",
+        help="Anthropic upstream base URL (default: Anthropic).",
     ),
 ):
-    """Start the profiling proxy."""
+    """Start the profiling proxy. One instance routes OpenAI and Anthropic
+    clients to their own upstreams, so it profiles both at once."""
     if not _port_available(host, port):
         console.print(
             f"[red]Port {port} on {host} is already in use.[/]\n"
@@ -50,15 +55,18 @@ def up(
 
     from .proxy import create_app
 
-    application = create_app(upstream=upstream)
-    base = f"http://{host}:{port}/v1"
+    application = create_app(upstream=upstream, anthropic_upstream=anthropic_upstream)
+    ups = application.state.upstreams
     console.print(
         Panel.fit(
-            f"[bold green]llmprof[/] is profiling on [cyan]{base}[/]\n\n"
-            f"Point your client at it:\n"
-            f"  [dim]OpenAI:[/]  base_url = [cyan]{base}[/]\n"
-            f"  upstream = [magenta]{application.state.upstream}[/]\n\n"
-            f"Then run [bold]llmprof traces[/] to see where your tokens went.",
+            f"[bold green]llmprof[/] is profiling on [cyan]http://{host}:{port}[/]\n\n"
+            f"Point your clients at it (key passes through):\n"
+            f"  [dim]OpenAI:[/]    base_url = [cyan]http://{host}:{port}/v1[/]  "
+            f"[dim]->[/] [magenta]{ups['openai']}[/]\n"
+            f"  [dim]Anthropic:[/] base_url = [cyan]http://{host}:{port}[/]     "
+            f"[dim]->[/] [magenta]{ups['anthropic']}[/]\n\n"
+            f"Open [cyan]http://{host}:{port}[/] for the dashboard, or "
+            f"[bold]llmprof traces[/].",
             title="llmprof",
             border_style="green",
         )

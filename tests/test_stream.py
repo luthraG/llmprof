@@ -1,6 +1,6 @@
 """Direct unit tests for the SSE scrapers (provider stream parsing)."""
 
-from llmprof.proxy import _scrape_anthropic, _scrape_openai
+from llmprof.proxy import _scrape_anthropic, _scrape_openai, _scrape_responses
 
 _BLANK = {"text": [], "fresh": None, "read": None, "write": None,
           "output": None, "prompt_total": None}
@@ -61,6 +61,23 @@ def test_scrape_anthropic_reads_cache_tokens():
     assert state["read"] == 85700
     assert state["write"] == 7600
     assert state["prompt_total"] == 700 + 85700 + 7600
+
+
+def test_scrape_responses_reads_text_usage_and_tools():
+    state = _state()
+    _scrape_responses(b'data: {"type":"response.output_text.delta","delta":"Hel"}\n\n', state)
+    _scrape_responses(b'data: {"type":"response.output_text.delta","delta":"lo"}\n\n', state)
+    _scrape_responses(
+        b'data: {"type":"response.output_item.added","item":'
+        b'{"type":"function_call","name":"search"}}\n\n', state)
+    _scrape_responses(
+        b'data: {"type":"response.completed","response":{"usage":'
+        b'{"input_tokens":1000,"output_tokens":9,"input_tokens_details":{"cached_tokens":600}}}}\n\n',
+        state)
+    assert "".join(state["text"]) == "Hello"
+    assert state["prompt_total"] == 1000 and state["read"] == 600 and state["fresh"] == 400
+    assert state["output"] == 9
+    assert "search" in state.get("tools", [])
 
 
 def test_scrape_ignores_malformed_lines():

@@ -32,7 +32,9 @@ async function load() {
   const r = await fetch("/llmprof/api/traces?limit=100");
   const data = await r.json();
   TRACES = data.traces || [];
-  $("#upstream").textContent = (data.upstream || "").replace(/^https?:\/\//, "");
+  const hosts = [...new Set(Object.values(data.upstreams || { x: data.upstream || "" })
+    .map(u => (u || "").replace(/^https?:\/\//, "")).filter(Boolean))];
+  $("#upstream").textContent = hosts.join(" + ");
   renderKpis();
   renderCalls();
   if (view === "trends") { renderTrends(); return; }

@@ -232,6 +232,52 @@ def message_fingerprint(payload: dict | None, provider: str) -> list[str]:
     return fps
 
 
+def responses_to_chat(payload: dict | None) -> dict:
+    """Adapt an OpenAI Responses API request ({instructions, input, tools}) into
+    the chat-completions shape ({messages, tools}) so the same attribution,
+    fingerprint, and route logic applies. Codex and newer tools use this API."""
+    payload = payload or {}
+    messages: list[dict] = []
+    instructions = payload.get("instructions")
+    if instructions:
+        messages.append({"role": "system", "content": instructions})
+
+    inp = payload.get("input")
+    if isinstance(inp, str):
+        messages.append({"role": "user", "content": inp})
+    elif isinstance(inp, list):
+        for item in inp:
+            if not isinstance(item, dict):
+                continue
+            itype = item.get("type")
+            if itype == "function_call":
+                messages.append({"role": "assistant", "content": item.get("arguments", "")})
+                continue
+            if itype == "function_call_output":
+                messages.append({"role": "tool", "content": str(item.get("output", ""))})
+                continue
+            role = item.get("role", "user")
+            content = item.get("content")
+            if isinstance(content, str):
+                text = content
+            elif isinstance(content, list):
+                text = " ".join(b.get("text", "") for b in content if isinstance(b, dict))
+            else:
+                text = ""
+            messages.append({"role": role, "content": text})
+
+    tools = []
+    for tool in payload.get("tools") or []:
+        if isinstance(tool, dict) and tool.get("type") == "function" and "function" not in tool:
+            # Responses tools are flat: {type, name, description, parameters}
+            tools.append({"type": "function", "function": {
+                "name": tool.get("name"), "description": tool.get("description", ""),
+                "parameters": tool.get("parameters", {})}})
+        else:
+            tools.append(tool)
+    return {"model": payload.get("model"), "messages": messages, "tools": tools}
+
+
 def content_blocks(payload: dict | None, provider: str) -> list[str]:
     """Flat list of the request's content strings (messages + tool schemas), for
     duplicate detection. Each message and each tool schema is one block."""

@@ -1,6 +1,7 @@
 import httpx
 from fastapi.testclient import TestClient
 
+from llmprof import pricing
 from llmprof.proxy import create_app
 
 
@@ -248,6 +249,40 @@ def test_anthropic_cost_is_cache_aware(tmp_path):
     assert t["cached_tokens"] == 85700
     assert t["prompt_tokens"] == 704 + 85700 + 7600
     assert abs(t["cost_usd"] - 0.1637) < 0.0005  # matches /usage, not ~$0.46 naive
+
+
+def test_provider_aware_upstreams(tmp_path):
+    app = create_app(db_path=str(tmp_path / "u.db"),
+                     upstream="http://oai", anthropic_upstream="http://anthro")
+    assert app.state.upstreams == {"openai": "http://oai", "anthropic": "http://anthro"}
+    app.state.client = httpx.AsyncClient(transport=_mock({}))
+    h = TestClient(app).get("/llmprof/health").json()
+    assert h["ok"] is True and h["upstreams"]["anthropic"] == "http://anthro"
+
+
+def test_responses_api_is_attributed_and_cache_aware(tmp_path):
+    """Codex and other Responses-API clients are captured: the request is adapted
+    to chat shape for attribution, and cached input is priced cheaply."""
+    app = create_app(db_path=str(tmp_path / "resp.db"), upstream="http://mock")
+    app.state.client = httpx.AsyncClient(transport=_mock({
+        "output": [{"type": "function_call", "name": "search"},
+                   {"type": "message", "content": [{"type": "output_text", "text": "ok"}]}],
+        "usage": {"input_tokens": 1000, "output_tokens": 20,
+                  "input_tokens_details": {"cached_tokens": 800}},
+    }))
+    client = TestClient(app)
+    client.post("/v1/responses", json={
+        "model": "gpt-4o", "instructions": "You are a careful assistant. " * 5,
+        "input": "summarize this contract",
+        "tools": [{"type": "function", "name": "search", "description": "d", "parameters": {}}],
+    })
+    t = client.get("/llmprof/api/traces").json()["traces"][0]
+    assert t["endpoint"] == "/v1/responses"
+    assert t["prompt_tokens"] == 1000 and t["cached_tokens"] == 800
+    assert t["cost_usd"] < pricing.cost("gpt-4o", 1000, 20)  # cache-aware, below full price
+    detail = client.get(f"/llmprof/api/traces/{t['id']}").json()
+    names = [c["name"] for c in detail["detail"]["children"]]
+    assert "system prompt" in names and "tool schemas" in names
 
 
 def test_api_ingest_rejects_bad_json(tmp_path):

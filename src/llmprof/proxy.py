@@ -27,7 +27,8 @@ from starlette.concurrency import run_in_threadpool
 from . import analyze, ingest, pricing, tokens
 from .store import open_store
 
-DEFAULT_UPSTREAM = os.environ.get("LLMPROF_UPSTREAM", "https://api.openai.com")
+DEFAULT_OPENAI_UPSTREAM = os.environ.get("LLMPROF_UPSTREAM", "https://api.openai.com")
+DEFAULT_ANTHROPIC_UPSTREAM = os.environ.get("LLMPROF_ANTHROPIC_UPSTREAM", "https://api.anthropic.com")
 _SKIP_HEADERS = {"host", "content-length", "connection", "accept-encoding"}
 _UI_DIR = Path(__file__).parent / "ui"
 _UI_HTML = (_UI_DIR / "index.html").read_text(encoding="utf-8")
@@ -39,20 +40,27 @@ def _forward_headers(request: Request) -> dict[str, str]:
     return {k: v for k, v in request.headers.items() if k.lower() not in _SKIP_HEADERS}
 
 
-def create_app(db_path: str | None = None, upstream: str | None = None) -> FastAPI:
+def create_app(db_path: str | None = None, upstream: str | None = None,
+               anthropic_upstream: str | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         yield
         await app.state.client.aclose()
 
     app = FastAPI(title="llmprof", version="0.0.1", lifespan=lifespan)
-    app.state.upstream = (upstream or DEFAULT_UPSTREAM).rstrip("/")
+    # one proxy serves both providers: route each request to the right upstream.
+    # `--upstream` overrides the OpenAI-compatible endpoint (OpenAI, Groq, ...).
+    app.state.upstreams = {
+        "openai": (upstream or DEFAULT_OPENAI_UPSTREAM).rstrip("/"),
+        "anthropic": (anthropic_upstream or DEFAULT_ANTHROPIC_UPSTREAM).rstrip("/"),
+    }
+    app.state.upstream = app.state.upstreams["openai"]  # back-compat
     app.state.client = httpx.AsyncClient(timeout=httpx.Timeout(600.0))
     app.state.store = open_store(db_path)
 
     @app.get("/llmprof/health")
     async def health() -> dict:
-        return {"ok": True, "upstream": app.state.upstream}
+        return {"ok": True, "upstreams": app.state.upstreams}
 
     @app.get("/", response_class=HTMLResponse)
     @app.get("/llmprof", response_class=HTMLResponse)
@@ -69,7 +77,8 @@ def create_app(db_path: str | None = None, upstream: str | None = None) -> FastA
 
     @app.get("/llmprof/api/traces")
     async def api_traces(limit: int = 100) -> dict:
-        return {"traces": app.state.store.recent(limit), "upstream": app.state.upstream}
+        return {"traces": app.state.store.recent(limit),
+                "upstream": app.state.upstreams["openai"], "upstreams": app.state.upstreams}
 
     @app.get("/llmprof/api/summary")
     async def api_summary() -> dict:
@@ -123,11 +132,15 @@ def create_app(db_path: str | None = None, upstream: str | None = None) -> FastA
 
     @app.post("/v1/chat/completions")
     async def chat_completions(request: Request):
-        return await _handle(app, request, "/v1/chat/completions", "openai")
+        return await _handle(app, request, "/v1/chat/completions", "openai", "chat")
 
     @app.post("/v1/messages")
     async def messages(request: Request):
-        return await _handle(app, request, "/v1/messages", "anthropic")
+        return await _handle(app, request, "/v1/messages", "anthropic", "messages")
+
+    @app.post("/v1/responses")
+    async def responses(request: Request):
+        return await _handle(app, request, "/v1/responses", "openai", "responses")
 
     @app.api_route(
         "/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
@@ -154,10 +167,11 @@ def _attribute(payload: dict, provider: str) -> dict:
     )
 
 
-def _usage_fields(usage: dict, provider: str) -> dict:
+def _usage_fields(usage: dict, wire: str) -> dict:
     """Normalize a provider usage object to {fresh, read, write, output,
-    prompt_total} so cost can be priced cache-aware. Any value may be None."""
-    if provider == "anthropic":
+    prompt_total} so cost can be priced cache-aware. Any value may be None.
+    `wire` is one of: chat, messages (Anthropic), responses (OpenAI Responses)."""
+    if wire == "messages":
         fresh = usage.get("input_tokens")
         read = usage.get("cache_read_input_tokens")
         write = usage.get("cache_creation_input_tokens")
@@ -166,7 +180,14 @@ def _usage_fields(usage: dict, provider: str) -> dict:
         if fresh is not None or read is not None or write is not None:
             total = (fresh or 0) + (read or 0) + (write or 0)
         return {"fresh": fresh, "read": read, "write": write, "output": out, "prompt_total": total}
-    # OpenAI-compatible: prompt_tokens is the full prompt; cached is a subset
+    if wire == "responses":
+        # Responses API: input_tokens is the full prompt; cached is a subset
+        total = usage.get("input_tokens")
+        read = (usage.get("input_tokens_details") or {}).get("cached_tokens")
+        fresh = (total - (read or 0)) if total is not None else None
+        return {"fresh": fresh, "read": read, "write": 0,
+                "output": usage.get("output_tokens"), "prompt_total": total}
+    # chat completions: prompt_tokens is the full prompt; cached is a subset
     pt = usage.get("prompt_tokens")
     read = (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
     fresh = (pt - (read or 0)) if pt is not None else None
@@ -174,13 +195,13 @@ def _usage_fields(usage: dict, provider: str) -> dict:
             "output": usage.get("completion_tokens"), "prompt_total": pt}
 
 
-def _usage_from_body(data: bytes, provider: str) -> dict:
+def _usage_from_body(data: bytes, wire: str) -> dict:
     """Cache-aware usage from a buffered response (see _usage_fields)."""
     try:
         usage = json.loads(data).get("usage") or {}
     except (json.JSONDecodeError, AttributeError):
         return {}
-    return _usage_fields(usage, provider)
+    return _usage_fields(usage, wire)
 
 
 def _scrape_openai(chunk: bytes, state: dict) -> None:
@@ -195,9 +216,27 @@ def _scrape_openai(chunk: bytes, state: dict) -> None:
                     state["tools"].append(fn)
             usage = obj.get("usage")  # present only with stream_options include_usage
             if usage:
-                _merge_usage(state, _usage_fields(usage, "openai"))
+                _merge_usage(state, _usage_fields(usage, "chat"))
         except (KeyError, IndexError, AttributeError):
             pass
+
+
+def _scrape_responses(chunk: bytes, state: dict) -> None:
+    """Scrape an OpenAI Responses API SSE stream (used by Codex and others)."""
+    for obj in _sse_objects(chunk):
+        t = obj.get("type")
+        if t == "response.output_text.delta":
+            delta = obj.get("delta")
+            if isinstance(delta, str):
+                state["text"].append(delta)
+        elif t == "response.output_item.added":
+            item = obj.get("item") or {}
+            if item.get("type") == "function_call" and item.get("name"):
+                if item["name"] not in state.setdefault("tools", []):
+                    state["tools"].append(item["name"])
+        elif t in ("response.completed", "response.incomplete", "response.failed"):
+            usage = (obj.get("response") or {}).get("usage") or {}
+            _merge_usage(state, _usage_fields(usage, "responses"))
 
 
 def _merge_usage(state: dict, fields: dict) -> None:
@@ -211,7 +250,7 @@ def _scrape_anthropic(chunk: bytes, state: dict) -> None:
         t = obj.get("type")
         if t == "message_start":
             usage = (obj.get("message") or {}).get("usage") or {}
-            _merge_usage(state, _usage_fields(usage, "anthropic"))
+            _merge_usage(state, _usage_fields(usage, "messages"))
         elif t == "content_block_start":
             block = obj.get("content_block") or {}
             if block.get("type") == "tool_use" and block.get("name"):
@@ -227,17 +266,21 @@ def _scrape_anthropic(chunk: bytes, state: dict) -> None:
                 state["output"] = usage["output_tokens"]
 
 
-def _called_tools_from_body(data: bytes, provider: str) -> list[str]:
+def _called_tools_from_body(data: bytes, wire: str) -> list[str]:
     """Tool names the model actually invoked in a (buffered) response."""
     try:
         obj = json.loads(data)
     except (json.JSONDecodeError, AttributeError):
         return []
     names: list[str] = []
-    if provider == "anthropic":
+    if wire == "messages":
         for block in obj.get("content") or []:
             if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name"):
                 names.append(block["name"])
+    elif wire == "responses":
+        for item in obj.get("output") or []:
+            if isinstance(item, dict) and item.get("type") == "function_call" and item.get("name"):
+                names.append(item["name"])
     else:
         for choice in obj.get("choices") or []:
             for tc in (choice.get("message") or {}).get("tool_calls") or []:
@@ -269,7 +312,10 @@ def _sse_objects(chunk: bytes):
 # --------------------------------------------------------------------------- #
 # Request handling
 # --------------------------------------------------------------------------- #
-async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
+_SCRAPERS = {"chat": _scrape_openai, "messages": _scrape_anthropic, "responses": _scrape_responses}
+
+
+async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str, wire: str):
     body = await request.body()
     try:
         payload = json.loads(body) if body else {}
@@ -278,8 +324,11 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
 
     model = payload.get("model", "")
     headers = _forward_headers(request)
-    url = app.state.upstream + endpoint
+    url = app.state.upstreams[provider] + endpoint   # route to the right provider
     started = time.time()
+    # the Responses API has a different request shape; adapt it to chat shape so
+    # all the attribution/fingerprint/route logic applies unchanged.
+    attr_payload = tokens.responses_to_chat(payload) if wire == "responses" else payload
     # optional explicit run id; overrides the prefix-chain heuristic when set
     session_hint = request.headers.get("x-llmprof-session")
 
@@ -287,7 +336,7 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
         req = app.state.client.build_request("POST", url, content=body, headers=headers)
         upstream = await app.state.client.send(req, stream=True)
         status = upstream.status_code
-        scrape = _scrape_anthropic if provider == "anthropic" else _scrape_openai
+        scrape = _SCRAPERS[wire]
         state = {"text": [], "fresh": None, "read": None, "write": None,
                  "output": None, "prompt_total": None, "tools": []}
 
@@ -299,7 +348,7 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
             usage = {k: state.get(k) for k in ("fresh", "read", "write", "output", "prompt_total")}
             # tokenization runs in a threadpool after the stream, off the loop
             await run_in_threadpool(
-                _record_blocking, app, provider, model, payload, usage,
+                _record_blocking, app, provider, endpoint, model, attr_payload, usage,
                 state["tools"], "".join(state["text"]), status, started, True, session_hint,
             )
 
@@ -311,12 +360,12 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
 
     upstream = await app.state.client.post(url, content=body, headers=headers)
     data = upstream.content
-    usage = _usage_from_body(data, provider)
-    called = _called_tools_from_body(data, provider)
+    usage = _usage_from_body(data, wire)
+    called = _called_tools_from_body(data, wire)
     # forward immediately; attribute + record in the background so the proxy adds
     # essentially no latency to the proxied call.
     record = BackgroundTask(
-        _record_blocking, app, provider, model, payload, usage,
+        _record_blocking, app, provider, endpoint, model, attr_payload, usage,
         called, None, upstream.status_code, started, False, session_hint,
     )
     return Response(
@@ -327,11 +376,12 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
     )
 
 
-def _record_blocking(app, provider, model, payload, usage,
+def _record_blocking(app, provider, endpoint, model, payload, usage,
                      called_tools, completion_text, status, started, streamed,
                      session_hint=None):
     """All the CPU work (tokenization + attribution) and the DB write. Runs in a
-    threadpool / background task so it never blocks the proxied request."""
+    threadpool / background task so it never blocks the proxied request. `payload`
+    is already in chat shape (Responses requests are adapted before this)."""
     breakdown = _attribute(payload, provider)
     msg_fp = tokens.message_fingerprint(payload, provider)
     route = tokens.route_label(payload, provider)
@@ -362,7 +412,7 @@ def _record_blocking(app, provider, model, payload, usage,
             "ts": started,
             "provider": provider,
             "model": model,
-            "endpoint": "/v1/messages" if provider == "anthropic" else "/v1/chat/completions",
+            "endpoint": endpoint,
             "status": status,
             "prompt_tokens": prompt_total,
             "completion_tokens": completion_tokens,
@@ -384,7 +434,8 @@ def _record_blocking(app, provider, model, payload, usage,
 
 
 async def _proxy_raw(app: FastAPI, request: Request, path: str):
-    url = app.state.upstream + path
+    # unknown paths default to the OpenAI-compatible upstream
+    url = app.state.upstreams["openai"] + path
     body = await request.body()
     upstream = await app.state.client.request(
         request.method,
