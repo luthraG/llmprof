@@ -3,7 +3,9 @@
 This is the heart of the profiler: instead of one total, we break a request's
 prompt tokens into the components that make it up (system prompt, tool schemas,
 RAG/history, current input) so you can see what is actually eating the context
-window. Counts are tiktoken-based and approximate for non-OpenAI models.
+window. Each attribute_* function returns both a flat `components` map (for list
+views) and a `tree` (for the flame graph, with per-tool drill-down). Counts are
+tiktoken-based and approximate for non-OpenAI models.
 """
 
 from __future__ import annotations
@@ -50,6 +52,24 @@ def _json(value) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _leaf(name: str, tokens: int) -> dict:
+    return {"name": name, "tokens": tokens, "children": []}
+
+
+def _assemble(nodes: list[dict], priming: int, model: str) -> dict:
+    """Turn top-level component nodes into the standard attribute() result."""
+    components = {n["name"]: n["tokens"] for n in nodes}
+    prompt_total = sum(components.values())
+    tree = {"name": "context", "tokens": prompt_total, "children": nodes}
+    return {
+        "components": components,
+        "tree": tree,
+        "total": prompt_total + priming,
+        "model": model,
+        "approximate": True,
+    }
+
+
 # --------------------------------------------------------------------------- #
 # OpenAI chat completions
 # --------------------------------------------------------------------------- #
@@ -63,23 +83,40 @@ def _openai_message_text(message: dict) -> str:
 
 
 def attribute_openai(messages: list[dict] | None, tools=None, model: str = "gpt-4o") -> dict:
-    """Break an OpenAI chat request into token components."""
+    """Break an OpenAI chat request into token components with a flame tree."""
     enc = _encoding(model)
-    components: dict[str, int] = {}
+    merged: dict[str, int] = {}
+    order: list[str] = []
 
     def add(label: str, toks: int) -> None:
-        components[label] = components.get(label, 0) + toks
+        if label not in merged:
+            merged[label] = 0
+            order.append(label)
+        merged[label] += toks
 
     for message in messages or []:
         role = message.get("role", "user")
         toks = len(enc.encode(_openai_message_text(message))) + _PER_MESSAGE_OVERHEAD
         add(_OPENAI_ROLE_LABELS.get(role, role), toks)
 
-    if tools:
-        add("tool schemas", len(enc.encode(_json(tools))))
+    nodes = [_leaf(label, merged[label]) for label in order]
 
-    total = sum(components.values()) + _REPLY_PRIMING
-    return {"components": components, "total": total, "model": model, "approximate": True}
+    if tools:
+        children = []
+        for tool in tools:
+            t = tool if isinstance(tool, dict) else {}
+            fn = t.get("function", t)
+            name = fn.get("name") or t.get("name") or "tool"
+            children.append(_leaf(name, len(enc.encode(_json(tool)))))
+        nodes.append(
+            {
+                "name": "tool schemas",
+                "tokens": sum(c["tokens"] for c in children),
+                "children": children,
+            }
+        )
+
+    return _assemble(nodes, _REPLY_PRIMING, model)
 
 
 # --------------------------------------------------------------------------- #
@@ -109,9 +146,7 @@ def _anthropic_message_parts(message: dict) -> list[tuple[str, str]]:
             if isinstance(inner, str):
                 text = inner
             else:
-                text = " ".join(
-                    b.get("text", "") for b in (inner or []) if isinstance(b, dict)
-                )
+                text = " ".join(b.get("text", "") for b in (inner or []) if isinstance(b, dict))
             parts.append(("tool results", text))
     return parts
 
@@ -120,35 +155,45 @@ def attribute_anthropic(
     system=None, messages: list[dict] | None = None, tools=None,
     model: str = "claude-3-5-sonnet",
 ) -> dict:
-    """Break an Anthropic messages request into token components.
-
-    Anthropic puts the system prompt at the top level (not as a message), uses
-    user/assistant roles, and carries tool_use / tool_result content blocks.
-    Token counts approximate Claude's tokenizer with cl100k_base.
-    """
+    """Break an Anthropic messages request into token components with a tree."""
     enc = _encoding(model)
-    components: dict[str, int] = {}
+    merged: dict[str, int] = {}
+    order: list[str] = []
 
     def add(label: str, text: str) -> None:
-        if text:
-            components[label] = components.get(label, 0) + len(enc.encode(text))
+        if not text:
+            return
+        if label not in merged:
+            merged[label] = 0
+            order.append(label)
+        merged[label] += len(enc.encode(text))
 
     if system:
-        if isinstance(system, str):
-            sys_text = system
-        else:
-            sys_text = " ".join(b.get("text", "") for b in system if isinstance(b, dict))
+        sys_text = system if isinstance(system, str) else " ".join(
+            b.get("text", "") for b in system if isinstance(b, dict)
+        )
         add("system prompt", sys_text)
 
     for message in messages or []:
         for label, text in _anthropic_message_parts(message):
             add(label, text)
 
-    if tools:
-        add("tool schemas", _json(tools))
+    nodes = [_leaf(label, merged[label]) for label in order]
 
-    total = sum(components.values())
-    return {"components": components, "total": total, "model": model, "approximate": True}
+    if tools:
+        children = []
+        for tool in tools:
+            name = tool.get("name", "tool") if isinstance(tool, dict) else "tool"
+            children.append(_leaf(name, len(enc.encode(_json(tool)))))
+        nodes.append(
+            {
+                "name": "tool schemas",
+                "tokens": sum(c["tokens"] for c in children),
+                "children": children,
+            }
+        )
+
+    return _assemble(nodes, 0, model)
 
 
 # Back-compat alias (OpenAI was the first provider supported).

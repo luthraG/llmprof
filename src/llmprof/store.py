@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS traces (
     total_tokens INTEGER,
     cost_usd REAL,
     streamed INTEGER,
-    components TEXT
+    components TEXT,
+    detail TEXT
 );
 """
 
@@ -53,14 +54,18 @@ class Store:
             if self.path != ":memory:":
                 conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(_SCHEMA)
+            # migrate older databases that predate the detail column
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(traces)")]
+            if "detail" not in cols:
+                conn.execute("ALTER TABLE traces ADD COLUMN detail TEXT")
 
     def record(self, trace: dict) -> None:
         with self._connect() as conn:
             conn.execute(
                 """INSERT INTO traces
                    (ts, provider, model, endpoint, status, prompt_tokens,
-                    completion_tokens, total_tokens, cost_usd, streamed, components)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    completion_tokens, total_tokens, cost_usd, streamed, components, detail)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     trace.get("ts", time.time()),
                     trace.get("provider"),
@@ -73,17 +78,26 @@ class Store:
                     trace.get("cost_usd"),
                     1 if trace.get("streamed") else 0,
                     json.dumps(trace.get("components") or {}),
+                    json.dumps(trace.get("detail")) if trace.get("detail") else None,
                 ),
             )
+
+    def _row(self, r: sqlite3.Row, with_detail: bool = False) -> dict:
+        d = dict(r)
+        d["components"] = json.loads(d.get("components") or "{}")
+        detail = d.pop("detail", None)
+        if with_detail:
+            d["detail"] = json.loads(detail) if detail else None
+        return d
 
     def recent(self, limit: int = 50) -> list[dict]:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM traces ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
-        out = []
-        for r in rows:
-            d = dict(r)
-            d["components"] = json.loads(d.get("components") or "{}")
-            out.append(d)
-        return out
+        return [self._row(r) for r in rows]
+
+    def get(self, trace_id: int) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM traces WHERE id = ?", (trace_id,)).fetchone()
+        return self._row(row, with_detail=True) if row else None

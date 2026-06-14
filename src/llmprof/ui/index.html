@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>llmprof</title>
+<style>
+  :root {
+    --bg: #0b0c0f;
+    --bg-1: #111319;
+    --bg-2: #161922;
+    --line: #222632;
+    --line-2: #2c313d;
+    --text: #e7ebf2;
+    --muted: #98a1b3;
+    --faint: #5b6475;
+    --accent: #7c84ff;
+    --accent-2: #3ddc97;
+    --amber: #f7a13b;
+    --radius: 12px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, system-ui, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text); font-family: var(--sans);
+    font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 6px; border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: #3a4150; }
+
+  /* top bar */
+  .topbar {
+    height: 56px; display: flex; align-items: center; gap: 18px;
+    padding: 0 20px; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, var(--bg-1), var(--bg));
+  }
+  .brand { display: flex; align-items: baseline; gap: 2px; font-weight: 700; font-size: 16px; letter-spacing: -0.01em; }
+  .brand .pf { color: var(--accent); }
+  .status { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); font-family: var(--mono); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 8px var(--accent-2); animation: pulse 2s infinite; }
+  @keyframes pulse { 50% { opacity: 0.4; } }
+  .topbar .spacer { flex: 1; }
+  .kpis { display: flex; gap: 26px; }
+  .kpi { text-align: right; }
+  .kpi b { display: block; font-family: var(--mono); font-size: 16px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .kpi span { font-size: 10.5px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.06em; }
+
+  /* layout */
+  .app { display: grid; grid-template-columns: 320px 1fr; height: calc(100vh - 56px); }
+  .sidebar { border-right: 1px solid var(--line); overflow-y: auto; background: var(--bg); }
+  .side-head { padding: 14px 16px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint); position: sticky; top: 0; background: var(--bg); z-index: 1; }
+  .call {
+    display: block; width: 100%; text-align: left; cursor: pointer;
+    background: none; border: 0; color: inherit; font: inherit;
+    padding: 11px 16px; border-bottom: 1px solid var(--line);
+    border-left: 2px solid transparent; transition: background 0.12s, border-color 0.12s;
+  }
+  .call:hover { background: var(--bg-1); }
+  .call.active { background: var(--bg-2); border-left-color: var(--accent); }
+  .call-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .call-model { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .call-cost { font-family: var(--mono); font-size: 12px; color: var(--accent-2); white-space: nowrap; }
+  .call-sub { display: flex; justify-content: space-between; margin-top: 4px; font-size: 11.5px; color: var(--faint); }
+  .call-sub .num { color: var(--muted); }
+  .badge { display: inline-block; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.05em; padding: 1px 6px; border-radius: 5px; background: var(--bg-2); color: var(--muted); border: 1px solid var(--line-2); }
+
+  /* main */
+  .main { overflow-y: auto; padding: 24px 28px 60px; }
+  .detail-head { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
+  .dh-title h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+  .dh-title .meta { color: var(--muted); font-size: 12.5px; font-family: var(--mono); margin-top: 3px; }
+  .dh-stats { display: flex; gap: 22px; margin-left: auto; align-items: center; }
+  .stat b { display: block; font-family: var(--mono); font-size: 19px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .stat span { font-size: 10.5px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.06em; }
+  .stat.cost b { color: var(--accent-2); }
+
+  .detail-head, .panel, .insight { animation: rise 0.28s cubic-bezier(0.22,1,0.36,1) both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+  .insight {
+    display: flex; align-items: center; gap: 13px; margin-bottom: 18px;
+    background: linear-gradient(90deg, rgba(247,161,59,0.14), rgba(247,161,59,0.02) 60%, transparent);
+    border: 1px solid var(--line); border-left: 3px solid var(--amber);
+    border-radius: 10px; padding: 13px 16px;
+  }
+  .insight .ic { font-size: 18px; line-height: 1; }
+  .insight .txt { font-size: 14px; color: var(--muted); }
+  .insight .txt b { color: var(--text); }
+  .insight .num { color: var(--amber); }
+  .panel { background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin-bottom: 18px; }
+  .panel-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--faint); margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; }
+  .crumbs { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 12px; text-transform: none; letter-spacing: 0; }
+  .crumb { color: var(--muted); cursor: pointer; padding: 2px 6px; border-radius: 5px; }
+  .crumb:hover { background: var(--bg-2); color: var(--text); }
+  .crumb.cur { color: var(--text); }
+  .crumb-sep { color: var(--faint); }
+
+  /* flame graph */
+  #flame { width: 100%; }
+  #flame svg { display: block; width: 100%; height: auto; }
+  .frame rect { transition: opacity 0.12s; rx: 3; }
+  .frame text { font-family: var(--mono); font-size: 11px; pointer-events: none; fill: #0a0c10; font-weight: 600; }
+  .frame:hover rect { opacity: 0.82; }
+
+  .tip {
+    position: fixed; z-index: 60; pointer-events: none; opacity: 0;
+    background: #0a0c10; border: 1px solid var(--line-2); border-radius: 8px;
+    padding: 9px 12px; font-size: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    transition: opacity 0.1s; max-width: 280px;
+  }
+  .tip.on { opacity: 1; }
+  .tip .t-name { font-weight: 700; margin-bottom: 4px; }
+  .tip .t-row { font-family: var(--mono); color: var(--muted); font-size: 11.5px; }
+  .tip .t-row b { color: var(--text); }
+
+  /* legend / breakdown */
+  .legend { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; }
+  .leg { display: grid; grid-template-columns: 12px 1fr auto auto; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .leg .sw { width: 11px; height: 11px; border-radius: 3px; }
+  .leg .lname { font-size: 13px; }
+  .leg .ltok { font-family: var(--mono); color: var(--muted); font-size: 12px; }
+  .leg .lpct { font-family: var(--mono); color: var(--faint); font-size: 12px; width: 44px; text-align: right; }
+
+  /* empty state */
+  .empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; text-align: center; color: var(--muted); padding: 40px; }
+  .empty h2 { font-size: 18px; color: var(--text); margin-bottom: 10px; font-weight: 700; }
+  .empty code { font-family: var(--mono); background: var(--bg-2); border: 1px solid var(--line-2); border-radius: 6px; padding: 3px 8px; color: var(--accent-2); }
+  .empty .hint { margin-top: 14px; font-size: 13px; }
+  .empty .glyph { font-size: 40px; opacity: 0.5; margin-bottom: 18px; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="brand">llmpro<span class="pf">f</span></div>
+  <div class="status"><span class="dot"></span><span id="upstream">connecting...</span></div>
+  <div class="spacer"></div>
+  <div class="kpis">
+    <div class="kpi"><b class="num" id="kpi-calls">0</b><span>calls</span></div>
+    <div class="kpi"><b class="num" id="kpi-tokens">0</b><span>tokens</span></div>
+    <div class="kpi"><b class="num" id="kpi-cost">$0</b><span>est. cost</span></div>
+  </div>
+</div>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="side-head">recent calls</div>
+    <div id="calls"></div>
+  </aside>
+  <main class="main" id="main"></main>
+</div>
+
+<div class="tip" id="tip"></div>
+
+<script>
+const CAT = {
+  "system prompt": "#7c84ff",
+  "user input": "#3ddc97",
+  "history (assistant)": "#4aa8ff",
+  "tool schemas": "#f7a13b",
+  "tool calls": "#c879ff",
+  "tool results": "#2bd4c0",
+};
+const TOOL_SHADES = ["#f7a13b", "#f4b860", "#e8954f", "#f9c07e", "#dd8a3c", "#ffcf94"];
+
+const $ = (s) => document.querySelector(s);
+const fmt = (n) => n >= 1e6 ? (n/1e6).toFixed(2)+"M" : n >= 1e3 ? (n/1e3).toFixed(1)+"k" : String(n);
+const money = (c) => c == null ? "$?" : c < 0.01 ? "$"+c.toFixed(4) : "$"+c.toFixed(2);
+const ago = (ts) => {
+  const s = Math.max(0, Date.now()/1000 - ts);
+  if (s < 60) return Math.floor(s)+"s ago";
+  if (s < 3600) return Math.floor(s/60)+"m ago";
+  if (s < 86400) return Math.floor(s/3600)+"h ago";
+  return Math.floor(s/86400)+"d ago";
+};
+
+let TRACES = [];
+let selectedId = null;
+let focusPath = [];   // array of nodes from root to current focus
+
+async function load() {
+  const r = await fetch("/llmprof/api/traces?limit=100");
+  const data = await r.json();
+  TRACES = data.traces || [];
+  $("#upstream").textContent = (data.upstream || "").replace(/^https?:\/\//, "");
+  renderKpis();
+  renderCalls();
+  if (selectedId == null && TRACES.length) select(TRACES[0].id);
+  else if (selectedId != null && !TRACES.find(t => t.id === selectedId) && TRACES.length) select(TRACES[0].id);
+  else if (!TRACES.length) renderEmpty();
+}
+
+function renderKpis() {
+  const calls = TRACES.length;
+  const tokens = TRACES.reduce((a,t) => a + (t.total_tokens||0), 0);
+  const cost = TRACES.reduce((a,t) => a + (t.cost_usd||0), 0);
+  $("#kpi-calls").textContent = fmt(calls);
+  $("#kpi-tokens").textContent = fmt(tokens);
+  $("#kpi-cost").textContent = money(cost);
+}
+
+function topComponent(comps) {
+  let best = null;
+  for (const [k,v] of Object.entries(comps||{})) if (!best || v > best[1]) best = [k,v];
+  return best;
+}
+
+function renderCalls() {
+  const el = $("#calls");
+  el.innerHTML = "";
+  for (const t of TRACES) {
+    const b = document.createElement("button");
+    b.className = "call" + (t.id === selectedId ? " active" : "");
+    b.onclick = () => select(t.id);
+    const top = topComponent(t.components);
+    b.innerHTML =
+      `<div class="call-top"><span class="call-model">${esc(t.model || "unknown")}</span>`+
+      `<span class="call-cost">${money(t.cost_usd)}</span></div>`+
+      `<div class="call-sub"><span><span class="num">${fmt(t.total_tokens||0)}</span> tok`+
+      `${t.streamed ? ' &middot; <span class="badge">stream</span>' : ''}</span>`+
+      `<span>${ago(t.ts)}</span></div>`;
+    el.appendChild(b);
+  }
+}
+
+async function select(id) {
+  selectedId = id;
+  focusPath = [];
+  renderCalls();
+  const r = await fetch("/llmprof/api/traces/" + id);
+  if (!r.ok) return;
+  const t = await r.json();
+  renderDetail(t);
+}
+
+function renderDetail(t) {
+  const tree = t.detail || {name:"context", tokens:t.prompt_tokens||0, children:[]};
+  focusPath = focusPath.length ? focusPath : [tree];
+  const main = $("#main");
+  const projection = t.cost_usd != null ? "&asymp; " + money(t.cost_usd * 1000) + " / 1k calls" : "";
+  main.innerHTML =
+    `<div class="detail-head">
+       <div class="dh-title">
+         <h1>${esc(t.model || "unknown")}</h1>
+         <div class="meta">${esc(t.provider||"")} &middot; ${ago(t.ts)} ${t.streamed?'&middot; streamed':''}</div>
+       </div>
+       <div class="dh-stats">
+         <div class="stat"><b class="num">${fmt(t.prompt_tokens||0)}</b><span>prompt</span></div>
+         <div class="stat"><b class="num">${fmt(t.completion_tokens||0)}</b><span>completion</span></div>
+         <div class="stat"><b class="num">${fmt(t.total_tokens||0)}</b><span>total</span></div>
+         <div class="stat cost"><b class="num">${money(t.cost_usd)}</b><span>${projection || 'est. cost'}</span></div>
+       </div>
+     </div>
+     <div id="insight"></div>
+     <div class="panel">
+       <div class="panel-title"><span>context flame graph</span><span class="crumbs" id="crumbs"></span></div>
+       <div id="flame"></div>
+     </div>
+     <div class="panel">
+       <div class="panel-title">breakdown</div>
+       <div class="legend" id="legend"></div>
+     </div>`;
+  renderInsight(tree);
+  drawFlame(tree);
+  drawLegend(tree);
+}
+
+function renderInsight(tree) {
+  const el = $("#insight"); if (!el) return;
+  const kids = tree.children || [];
+  if (!kids.length || !tree.tokens) { el.innerHTML = ""; return; }
+  const top = kids.reduce((a, b) => b.tokens > a.tokens ? b : a, kids[0]);
+  const pct = top.tokens / tree.tokens * 100;
+  const heavy = pct >= 45;
+  const verb = heavy ? "dominates this context" : "is the largest piece of this context";
+  const flameIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="#f7a13b"><path d="M13 2c.9 3.2-2.2 4.3-2.2 7.4a2.8 2.8 0 005.6.2c0-1-.4-1.9-1-2.8 2.2 1 4 3.2 4 6.1A7.4 7.4 0 015 13.2C5 8.6 9.4 6.6 13 2z"/></svg>';
+  const barsIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="#7c84ff"><rect x="3" y="11" width="4" height="10" rx="1"/><rect x="10" y="5" width="4" height="16" rx="1"/><rect x="17" y="14" width="4" height="7" rx="1"/></svg>';
+  el.innerHTML =
+    `<div class="insight">
+       <span class="ic">${heavy ? flameIcon : barsIcon}</span>
+       <span class="txt"><b>${esc(top.name)}</b> ${verb}: `+
+       `<span class="num">${top.tokens.toLocaleString()} tokens (${pct.toFixed(0)}%)</span>`+
+       `${top.children&&top.children.length?` across ${top.children.length} items, click it in the graph to drill in`:''}.</span>
+     </div>`;
+}
+
+function nodeColor(node, parent) {
+  if (CAT[node.name]) return CAT[node.name];
+  if (parent && parent.name === "tool schemas") {
+    const i = parent.children.indexOf(node);
+    return TOOL_SHADES[i % TOOL_SHADES.length];
+  }
+  if (node.name === "context") return "#39414f";
+  return "#8b98a5";
+}
+
+function drawCrumbs() {
+  const el = $("#crumbs");
+  if (!el) return;
+  el.innerHTML = "";
+  focusPath.forEach((n, i) => {
+    if (i) { const s = document.createElement("span"); s.className="crumb-sep"; s.textContent="/"; el.appendChild(s); }
+    const c = document.createElement("span");
+    c.className = "crumb" + (i === focusPath.length-1 ? " cur" : "");
+    c.textContent = n.name;
+    c.onclick = () => { focusPath = focusPath.slice(0, i+1); redraw(); };
+    el.appendChild(c);
+  });
+}
+
+let CURRENT_TREE = null;
+function drawFlame(tree) { CURRENT_TREE = tree; redraw(); }
+function redraw() {
+  const focus = focusPath[focusPath.length-1] || CURRENT_TREE;
+  drawCrumbs();
+  const host = $("#flame");
+  const W = host.clientWidth || 900;
+  const ROW = 30, GAP = 2, PAD = 0;
+  const NS = "http://www.w3.org/2000/svg";
+  const depth = maxDepth(focus);
+  const H = (depth+1) * (ROW+GAP);
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", W); svg.setAttribute("height", H);
+  const scale = focus.tokens > 0 ? W / focus.tokens : 0;
+  const totalCtx = (CURRENT_TREE.tokens || focus.tokens) || 1;
+
+  function draw(node, parent, dx, depthIdx) {
+    const w = Math.max((node.tokens||0) * scale, 0);
+    const x = dx, y = depthIdx * (ROW+GAP);
+    const g = document.createElementNS(NS, "g");
+    g.setAttribute("class", "frame");
+    g.style.cursor = (node.children && node.children.length) ? "pointer" : "default";
+    const rect = document.createElementNS(NS, "rect");
+    rect.setAttribute("x", x.toFixed(2)); rect.setAttribute("y", y);
+    rect.setAttribute("width", Math.max(w-1,0.5).toFixed(2)); rect.setAttribute("height", ROW);
+    rect.setAttribute("rx", 3);
+    rect.setAttribute("fill", nodeColor(node, parent));
+    g.appendChild(rect);
+    if (w > 46) {
+      const t = document.createElementNS(NS, "text");
+      t.setAttribute("x", x+7); t.setAttribute("y", y + ROW/2 + 4);
+      const chars = Math.floor((w-12)/6.4);
+      const label = node.name.length > chars ? node.name.slice(0, Math.max(chars-1,1))+"…" : node.name;
+      t.textContent = label;
+      g.appendChild(t);
+    }
+    const pct = (node.tokens/totalCtx*100);
+    g.addEventListener("mousemove", (e) => showTip(e, node, pct));
+    g.addEventListener("mouseleave", hideTip);
+    if (node.children && node.children.length) {
+      g.addEventListener("click", () => {
+        // build path from root to this node
+        const p = pathTo(CURRENT_TREE, node);
+        if (p) { focusPath = p; redraw(); }
+      });
+    }
+    svg.appendChild(g);
+    let cx = x;
+    // heaviest-first so the big picture reads left-to-right (Gregg)
+    const kids = (node.children||[]).slice().sort((a,b)=>(b.tokens||0)-(a.tokens||0));
+    for (const c of kids) { draw(c, node, cx, depthIdx+1); cx += (c.tokens||0)*scale; }
+  }
+  draw(focus, focusParent(focus), 0, 0);
+  host.innerHTML = ""; host.appendChild(svg);
+}
+
+function focusParent(focus) {
+  const idx = focusPath.indexOf(focus);
+  return idx > 0 ? focusPath[idx-1] : null;
+}
+function maxDepth(node) {
+  if (!node.children || !node.children.length) return 0;
+  return 1 + Math.max(...node.children.map(maxDepth));
+}
+function pathTo(root, target, acc=[]) {
+  const p = [...acc, root];
+  if (root === target) return p;
+  for (const c of (root.children||[])) { const r = pathTo(c, target, p); if (r) return r; }
+  return null;
+}
+
+function showTip(e, node, pct) {
+  const tip = $("#tip");
+  tip.innerHTML = `<div class="t-name">${esc(node.name)}</div>`+
+    `<div class="t-row"><b>${node.tokens.toLocaleString()}</b> tokens &middot; <b>${pct.toFixed(1)}%</b> of context</div>`+
+    `${node.children&&node.children.length?`<div class="t-row">${node.children.length} items &middot; click to zoom</div>`:''}`;
+  tip.classList.add("on");
+  const w = tip.offsetWidth;
+  tip.style.left = Math.min(e.clientX+14, innerWidth-w-12) + "px";
+  tip.style.top = (e.clientY+16) + "px";
+}
+function hideTip() { $("#tip").classList.remove("on"); }
+
+function drawLegend(tree) {
+  const el = $("#legend"); if (!el) return;
+  el.innerHTML = "";
+  const total = tree.tokens || 1;
+  const items = [...(tree.children||[])].sort((a,b)=>b.tokens-a.tokens);
+  for (const n of items) {
+    const row = document.createElement("div");
+    row.className = "leg";
+    row.innerHTML =
+      `<span class="sw" style="background:${nodeColor(n, tree)}"></span>`+
+      `<span class="lname">${esc(n.name)}</span>`+
+      `<span class="ltok num">${n.tokens.toLocaleString()}</span>`+
+      `<span class="lpct">${(n.tokens/total*100).toFixed(1)}%</span>`;
+    el.appendChild(row);
+  }
+}
+
+function renderEmpty() {
+  $("#main").innerHTML =
+    `<div class="empty">
+       <div class="glyph">&#128293;</div>
+       <h2>No calls captured yet</h2>
+       <div>Point your LLM client's base URL at this proxy:</div>
+       <div class="hint"><code>base_url = http://localhost:4000/v1</code></div>
+       <div class="hint">Send a request and it will appear here, broken down token by token.</div>
+     </div>`;
+}
+
+function esc(s) { return String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+addEventListener("resize", () => { if (CURRENT_TREE) redraw(); });
+addEventListener("keydown", (e) => {
+  if ((e.key === "Escape" || e.key === "0") && CURRENT_TREE) { focusPath = [CURRENT_TREE]; redraw(); }
+});
+load();
+setInterval(load, 4000);
+</script>
+</body>
+</html>

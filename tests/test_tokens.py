@@ -71,12 +71,46 @@ def test_attribute_anthropic_breaks_into_components():
     assert result["total"] > 0
 
 
+def test_openai_tree_has_per_tool_children():
+    tool_defs = [
+        {"type": "function", "function": {"name": "alpha", "description": "x", "parameters": {}}},
+        {"type": "function", "function": {"name": "beta", "description": "y", "parameters": {}}},
+    ]
+    result = tokens.attribute_openai([{"role": "user", "content": "hi"}], tool_defs, "gpt-4o")
+    assert result["tree"]["name"] == "context"
+    ts = next(n for n in result["tree"]["children"] if n["name"] == "tool schemas")
+    assert {c["name"] for c in ts["children"]} == {"alpha", "beta"}
+    assert ts["tokens"] == sum(c["tokens"] for c in ts["children"])
+
+
 def test_anthropic_system_as_blocks():
     result = tokens.attribute_anthropic(
         system=[{"type": "text", "text": "Be terse."}],
         messages=[{"role": "user", "content": "hi"}],
     )
     assert result["components"]["system prompt"] > 0
+
+
+def test_openai_multimodal_content():
+    messages = [
+        {"role": "user", "content": [
+            {"type": "text", "text": "describe this image please"},
+            {"type": "image_url", "image_url": {"url": "..."}},
+        ]}
+    ]
+    result = tokens.attribute_openai(messages, None, "gpt-4o")
+    assert result["components"]["user input"] > 0
+
+
+def test_anthropic_tool_result_as_blocks():
+    messages = [
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "x",
+             "content": [{"type": "text", "text": "the search returned several results"}]},
+        ]}
+    ]
+    result = tokens.attribute_anthropic(None, messages, None, "claude-3-5-sonnet")
+    assert result["components"].get("tool results", 0) > 0
 
 
 def test_pricing_known_and_unknown():

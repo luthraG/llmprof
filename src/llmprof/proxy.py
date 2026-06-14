@@ -16,10 +16,11 @@ import json
 import os
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, Request, Response
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
@@ -28,6 +29,7 @@ from .store import Store
 
 DEFAULT_UPSTREAM = os.environ.get("LLMPROF_UPSTREAM", "https://api.openai.com")
 _SKIP_HEADERS = {"host", "content-length", "connection", "accept-encoding"}
+_UI_HTML = (Path(__file__).parent / "ui" / "index.html").read_text(encoding="utf-8")
 
 
 def _forward_headers(request: Request) -> dict[str, str]:
@@ -48,6 +50,22 @@ def create_app(db_path: str | None = None, upstream: str | None = None) -> FastA
     @app.get("/llmprof/health")
     async def health() -> dict:
         return {"ok": True, "upstream": app.state.upstream}
+
+    @app.get("/", response_class=HTMLResponse)
+    @app.get("/llmprof", response_class=HTMLResponse)
+    async def dashboard() -> str:
+        return _UI_HTML
+
+    @app.get("/llmprof/api/traces")
+    async def api_traces(limit: int = 100) -> dict:
+        return {"traces": app.state.store.recent(limit), "upstream": app.state.upstream}
+
+    @app.get("/llmprof/api/traces/{trace_id}")
+    async def api_trace(trace_id: int) -> dict:
+        trace = app.state.store.get(trace_id)
+        if trace is None:
+            raise HTTPException(status_code=404, detail="trace not found")
+        return trace
 
     @app.post("/v1/chat/completions")
     async def chat_completions(request: Request):
@@ -223,6 +241,7 @@ def _record_blocking(app, provider, model, payload, usage_in, usage_out, complet
             "cost_usd": pricing.cost(model, prompt_tokens or 0, completion_tokens or 0),
             "streamed": streamed,
             "components": breakdown["components"],
+            "detail": breakdown["tree"],
         }
     )
 
