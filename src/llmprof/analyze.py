@@ -65,14 +65,19 @@ def duplicate_tokens(texts: list[str], model: str = "gpt-4o") -> int:
 
 
 def analyze(tree: dict, texts: list[str] | None = None, *, input_per_1k: float | None = None,
-            cached_tokens: int | None = None, called_tools: list[str] | None = None,
-            model: str = "gpt-4o") -> dict:
-    """Return {findings, reclaimable_tokens, reclaimable_usd} for one request."""
+            cached_tokens: int | None = None, cache_write: int | None = None,
+            called_tools: list[str] | None = None, model: str = "gpt-4o") -> dict:
+    """Return {findings, reclaimable_tokens, reclaimable_usd} for one request.
+
+    Caching counts as active if the request had cache reads OR writes, so we do
+    not claim caching savings on a prefix that is already being cached.
+    """
     tree = tree or {"tokens": 0, "children": []}
     children = tree.get("children") or []
     comp = {c["name"]: c.get("tokens", 0) for c in children}
     total = tree.get("tokens") or sum(comp.values()) or 1
     ts = comp.get("tool schemas", 0)
+    caching_active = bool(cached_tokens) or bool(cache_write)
     findings: list[dict] = []
 
     dup = duplicate_tokens(texts or [], model)
@@ -106,15 +111,17 @@ def analyze(tree: dict, texts: list[str] | None = None, *, input_per_1k: float |
             "used tools into a separate call.",
         ))
 
-    if cached_tokens:
-        pct = cached_tokens / (sum(comp.values()) or 1) * 100
-        findings.append(_finding(
-            "ok", "Prompt caching is active",
-            f"{cached_tokens:,} tokens ({pct:.0f}% of the prompt) were served from cache.",
-        ))
+    if caching_active:
+        served = cached_tokens or 0
+        if served:
+            pct = served / (sum(comp.values()) or 1) * 100
+            body = f"{served:,} tokens ({pct:.0f}% of the prompt) were served from cache."
+        else:
+            body = "the stable prefix is being written to cache on this call."
+        findings.append(_finding("ok", "Prompt caching is active", body))
 
     prefix = comp.get("system prompt", 0) + ts
-    if prefix >= 1024 and not cached_tokens:
+    if prefix >= 1024 and not caching_active:
         save = _usd(int(prefix * 0.9), input_per_1k)
         findings.append(_finding(
             "tip", "Stable prefix is not cached",

@@ -239,6 +239,49 @@ def cost(model: str | None, prompt_tokens: int, completion_tokens: int) -> float
     return round(prompt_tokens / 1000 * price[0] + completion_tokens / 1000 * price[1], 6)
 
 
+# Cache pricing as a multiple of the input rate, so the cost matches the bill
+# when prompt caching is in play. read = cache-hit price, write = cache-creation
+# price. Substring-matched on the model id (longest first), with a per-provider
+# fallback. Models/providers that do not report cache usage never trigger these
+# (their read/write token counts are zero), so cost is unchanged for them.
+_CACHE_READ_MULT: dict[str, float] = {
+    "claude": 0.1, "deepseek": 0.1, "gemini": 0.25,
+    "gpt-4o": 0.5, "gpt-4-turbo": 0.5, "gpt-4": 0.5, "gpt-3.5": 0.5,
+    "gpt-4.1": 0.25, "gpt-5": 0.25, "gpt-oss": 0.25, "o1": 0.25, "o3": 0.25, "o4": 0.25,
+}
+_CACHE_WRITE_MULT: dict[str, float] = {"claude": 1.25}
+_PROVIDER_READ_DEFAULT: dict[str, float] = {"anthropic": 0.1, "openai": 0.5}
+
+
+def _mult(table: dict[str, float], model: str | None, default: float) -> float:
+    m = (model or "").lower()
+    for key in sorted(table, key=len, reverse=True):
+        if key in m:
+            return table[key]
+    return default
+
+
+def cost_cached(model: str | None, provider: str, fresh_input: int | None,
+                cache_read: int | None, cache_write: int | None,
+                completion: int | None) -> float | None:
+    """Cache-aware cost: fresh prompt tokens at full input rate, cache reads and
+    writes at their multiples, completion at the output rate. Returns None if the
+    model's pricing is unknown. Matches provider bills (e.g. Anthropic /usage)."""
+    price = _match(model)
+    if not price:
+        return None
+    inp, out = price
+    read_mult = _mult(_CACHE_READ_MULT, model, _PROVIDER_READ_DEFAULT.get(provider, 0.25))
+    write_mult = _mult(_CACHE_WRITE_MULT, model, 0.0)
+    total = (
+        (fresh_input or 0) * inp
+        + (cache_read or 0) * inp * read_mult
+        + (cache_write or 0) * inp * write_mult
+        + (completion or 0) * out
+    ) / 1000
+    return round(total, 6)
+
+
 # apply user overrides from the environment at import time
 _override_path = os.environ.get("LLMPROF_PRICING")
 if _override_path and os.path.exists(_override_path):

@@ -230,6 +230,26 @@ def test_api_ingest_records_labeled_components(tmp_path):
     assert any("not called" in f["title"] for f in detail["analysis"]["findings"])
 
 
+def test_anthropic_cost_is_cache_aware(tmp_path):
+    """A proxied Anthropic call with cache reads/writes is priced like the bill,
+    not naive tokens x full input rate."""
+    app = create_app(db_path=str(tmp_path / "ca.db"), upstream="http://mock")
+    app.state.client = httpx.AsyncClient(
+        transport=_mock({
+            "content": [{"type": "text", "text": "ok"}],
+            "usage": {"input_tokens": 704, "cache_read_input_tokens": 85700,
+                      "cache_creation_input_tokens": 7600, "output_tokens": 2800},
+        })
+    )
+    client = TestClient(app)
+    client.post("/v1/messages", json={"model": "claude-opus-4-8",
+                "system": "s", "messages": [{"role": "user", "content": "hi"}]})
+    t = client.get("/llmprof/api/traces").json()["traces"][0]
+    assert t["cached_tokens"] == 85700
+    assert t["prompt_tokens"] == 704 + 85700 + 7600
+    assert abs(t["cost_usd"] - 0.1637) < 0.0005  # matches /usage, not ~$0.46 naive
+
+
 def test_api_ingest_rejects_bad_json(tmp_path):
     client = _client(tmp_path, "ing2.db")
     r = client.post("/llmprof/api/ingest", content=b"not json",

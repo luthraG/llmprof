@@ -165,6 +165,23 @@ def test_pricing_known_and_unknown():
     assert pricing.cost("some-unknown-model", 1000, 1000) is None
 
 
+def test_cost_cached_matches_a_real_anthropic_bill():
+    # the exact token split from a Claude Code /usage readout (opus-4-8, $5/$25 per 1M):
+    # 704 fresh input, 85.7k cache read (0.1x), 7.6k cache write (1.25x), 2.8k output
+    c = pricing.cost_cached("claude-opus-4-8", "anthropic",
+                            fresh_input=704, cache_read=85700, cache_write=7600, completion=2800)
+    assert abs(c - 0.1637) < 0.0005  # matches the bill, not naive tokens x full price
+    # naive full-price would be ~2.3x higher
+    naive = pricing.cost("claude-opus-4-8", 704 + 85700 + 7600, 2800)
+    assert naive > c * 2
+
+
+def test_cost_cached_no_cache_equals_plain_cost():
+    cached = pricing.cost_cached("gpt-4o", "openai", 1000, 0, 0, 1000)
+    assert cached == pricing.cost("gpt-4o", 1000, 1000)
+    assert pricing.cost_cached("some-unknown", "openai", 100, 0, 0, 0) is None
+
+
 def test_pricing_expanded_models_and_longest_match():
     # newer Claude dotted subversions fall back to the family tier price
     assert pricing.rates("claude-sonnet-4-6-20251015") == (0.003, 0.015)

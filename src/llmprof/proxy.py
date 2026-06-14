@@ -154,17 +154,33 @@ def _attribute(payload: dict, provider: str) -> dict:
     )
 
 
-def _usage_from_body(data: bytes, provider: str) -> tuple[int | None, int | None, int | None]:
-    """Returns (prompt_tokens, completion_tokens, cached_tokens)."""
+def _usage_fields(usage: dict, provider: str) -> dict:
+    """Normalize a provider usage object to {fresh, read, write, output,
+    prompt_total} so cost can be priced cache-aware. Any value may be None."""
+    if provider == "anthropic":
+        fresh = usage.get("input_tokens")
+        read = usage.get("cache_read_input_tokens")
+        write = usage.get("cache_creation_input_tokens")
+        out = usage.get("output_tokens")
+        total = None
+        if fresh is not None or read is not None or write is not None:
+            total = (fresh or 0) + (read or 0) + (write or 0)
+        return {"fresh": fresh, "read": read, "write": write, "output": out, "prompt_total": total}
+    # OpenAI-compatible: prompt_tokens is the full prompt; cached is a subset
+    pt = usage.get("prompt_tokens")
+    read = (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+    fresh = (pt - (read or 0)) if pt is not None else None
+    return {"fresh": fresh, "read": read, "write": 0,
+            "output": usage.get("completion_tokens"), "prompt_total": pt}
+
+
+def _usage_from_body(data: bytes, provider: str) -> dict:
+    """Cache-aware usage from a buffered response (see _usage_fields)."""
     try:
         usage = json.loads(data).get("usage") or {}
     except (json.JSONDecodeError, AttributeError):
-        return (None, None, None)
-    if provider == "anthropic":
-        return (usage.get("input_tokens"), usage.get("output_tokens"),
-                usage.get("cache_read_input_tokens"))
-    cached = (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
-    return (usage.get("prompt_tokens"), usage.get("completion_tokens"), cached)
+        return {}
+    return _usage_fields(usage, provider)
 
 
 def _scrape_openai(chunk: bytes, state: dict) -> None:
@@ -179,13 +195,15 @@ def _scrape_openai(chunk: bytes, state: dict) -> None:
                     state["tools"].append(fn)
             usage = obj.get("usage")  # present only with stream_options include_usage
             if usage:
-                state["input"] = usage.get("prompt_tokens", state["input"])
-                state["output"] = usage.get("completion_tokens", state["output"])
-                cached = (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
-                if cached is not None:
-                    state["cached"] = cached
+                _merge_usage(state, _usage_fields(usage, "openai"))
         except (KeyError, IndexError, AttributeError):
             pass
+
+
+def _merge_usage(state: dict, fields: dict) -> None:
+    for k in ("fresh", "read", "write", "output", "prompt_total"):
+        if fields.get(k) is not None:
+            state[k] = fields[k]
 
 
 def _scrape_anthropic(chunk: bytes, state: dict) -> None:
@@ -193,10 +211,7 @@ def _scrape_anthropic(chunk: bytes, state: dict) -> None:
         t = obj.get("type")
         if t == "message_start":
             usage = (obj.get("message") or {}).get("usage") or {}
-            state["input"] = usage.get("input_tokens", state["input"])
-            state["output"] = usage.get("output_tokens", state["output"])
-            if usage.get("cache_read_input_tokens") is not None:
-                state["cached"] = usage["cache_read_input_tokens"]
+            _merge_usage(state, _usage_fields(usage, "anthropic"))
         elif t == "content_block_start":
             block = obj.get("content_block") or {}
             if block.get("type") == "tool_use" and block.get("name"):
@@ -273,18 +288,19 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
         upstream = await app.state.client.send(req, stream=True)
         status = upstream.status_code
         scrape = _scrape_anthropic if provider == "anthropic" else _scrape_openai
-        state = {"text": [], "input": None, "output": None, "cached": None, "tools": []}
+        state = {"text": [], "fresh": None, "read": None, "write": None,
+                 "output": None, "prompt_total": None, "tools": []}
 
         async def gen():
             async for chunk in upstream.aiter_raw():
                 yield chunk
                 scrape(chunk, state)
             await upstream.aclose()
+            usage = {k: state.get(k) for k in ("fresh", "read", "write", "output", "prompt_total")}
             # tokenization runs in a threadpool after the stream, off the loop
             await run_in_threadpool(
-                _record_blocking, app, provider, model, payload,
-                state["input"], state["output"], state["cached"], state["tools"],
-                "".join(state["text"]), status, started, True, session_hint,
+                _record_blocking, app, provider, model, payload, usage,
+                state["tools"], "".join(state["text"]), status, started, True, session_hint,
             )
 
         return StreamingResponse(
@@ -295,14 +311,13 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
 
     upstream = await app.state.client.post(url, content=body, headers=headers)
     data = upstream.content
-    usage_in, usage_out, cached = _usage_from_body(data, provider)
+    usage = _usage_from_body(data, provider)
     called = _called_tools_from_body(data, provider)
     # forward immediately; attribute + record in the background so the proxy adds
     # essentially no latency to the proxied call.
     record = BackgroundTask(
-        _record_blocking, app, provider, model, payload,
-        usage_in, usage_out, cached, called, None, upstream.status_code, started, False,
-        session_hint,
+        _record_blocking, app, provider, model, payload, usage,
+        called, None, upstream.status_code, started, False, session_hint,
     )
     return Response(
         content=data,
@@ -312,7 +327,7 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
     )
 
 
-def _record_blocking(app, provider, model, payload, usage_in, usage_out, cached,
+def _record_blocking(app, provider, model, payload, usage,
                      called_tools, completion_text, status, started, streamed,
                      session_hint=None):
     """All the CPU work (tokenization + attribution) and the DB write. Runs in a
@@ -320,17 +335,26 @@ def _record_blocking(app, provider, model, payload, usage_in, usage_out, cached,
     breakdown = _attribute(payload, provider)
     msg_fp = tokens.message_fingerprint(payload, provider)
     route = tokens.route_label(payload, provider)
-    prompt_tokens = usage_in if usage_in is not None else breakdown["total"]
-    completion_tokens = (
-        usage_out
-        if usage_out is not None
-        else tokens.count_tokens(completion_text or "", model)
-    )
-    total = (prompt_tokens or 0) + (completion_tokens or 0)
+    usage = usage or {}
+
+    prompt_total = usage.get("prompt_total")
+    if prompt_total is None:
+        prompt_total = breakdown["total"]
+        fresh, read, write = prompt_total, 0, 0
+    else:
+        read = usage.get("read") or 0
+        write = usage.get("write") or 0
+        fresh = usage.get("fresh")
+        if fresh is None:
+            fresh = max(prompt_total - read - write, 0)
+    completion_tokens = usage.get("output")
+    if completion_tokens is None:
+        completion_tokens = tokens.count_tokens(completion_text or "", model)
+    total = (prompt_total or 0) + (completion_tokens or 0)
     rate = pricing.rates(model)
     analysis = analyze.analyze(
         breakdown["tree"], tokens.content_blocks(payload, provider),
-        input_per_1k=rate[0] if rate else None, cached_tokens=cached,
+        input_per_1k=rate[0] if rate else None, cached_tokens=read, cache_write=write,
         called_tools=called_tools, model=model or "gpt-4o",
     )
     app.state.store.record(
@@ -340,14 +364,15 @@ def _record_blocking(app, provider, model, payload, usage_in, usage_out, cached,
             "model": model,
             "endpoint": "/v1/messages" if provider == "anthropic" else "/v1/chat/completions",
             "status": status,
-            "prompt_tokens": prompt_tokens,
+            "prompt_tokens": prompt_total,
             "completion_tokens": completion_tokens,
             "total_tokens": total,
-            "cost_usd": pricing.cost(model, prompt_tokens or 0, completion_tokens or 0),
+            "cost_usd": pricing.cost_cached(model, provider, fresh, read, write, completion_tokens),
             "streamed": streamed,
             "components": breakdown["components"],
             "detail": breakdown["tree"],
-            "cached_tokens": cached,
+            "cached_tokens": read,
+            "cache_write_tokens": write,
             "called_tools": called_tools,
             "msg_fp": msg_fp,
             "session_hint": session_hint,

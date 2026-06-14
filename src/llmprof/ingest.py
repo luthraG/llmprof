@@ -106,7 +106,8 @@ def build_trace(model: str, provider: str, entries, called, usage: dict | None =
     prompt = usage.get("prompt")
     prompt = prompt if prompt is not None else tree["tokens"]
     completion = usage.get("completion") or 0
-    cached = usage.get("cached")
+    cached = usage.get("cached") or 0
+    fresh = max((prompt or 0) - cached, 0)
     rate = pricing.rates(model)
     ana = analyze.analyze(
         tree, [e[3] for e in entries], input_per_1k=rate[0] if rate else None,
@@ -117,8 +118,8 @@ def build_trace(model: str, provider: str, entries, called, usage: dict | None =
         "provider": provider, "model": model, "endpoint": "sdk", "status": 200,
         "prompt_tokens": prompt, "completion_tokens": completion,
         "total_tokens": (prompt or 0) + (completion or 0),
-        "cost_usd": pricing.cost(model, prompt or 0, completion or 0),
+        "cost_usd": pricing.cost_cached(model, provider, fresh, cached, 0, completion),
         "streamed": False, "components": components, "detail": tree,
-        "cached_tokens": cached, "called_tools": called,
+        "cached_tokens": cached, "cache_write_tokens": 0, "called_tools": called,
         "session_hint": session, "analysis": ana, "reclaimable_usd": ana["reclaimable_usd"],
     }

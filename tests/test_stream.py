@@ -2,9 +2,16 @@
 
 from llmprof.proxy import _scrape_anthropic, _scrape_openai
 
+_BLANK = {"text": [], "fresh": None, "read": None, "write": None,
+          "output": None, "prompt_total": None}
+
+
+def _state():
+    return dict(_BLANK, text=[])
+
 
 def test_scrape_openai_collects_text_deltas():
-    state = {"text": [], "input": None, "output": None}
+    state = _state()
     _scrape_openai(b'data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n', state)
     _scrape_openai(b'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n', state)
     _scrape_openai(b"data: [DONE]\n\n", state)
@@ -12,17 +19,19 @@ def test_scrape_openai_collects_text_deltas():
 
 
 def test_scrape_openai_reads_usage_when_present():
-    state = {"text": [], "input": None, "output": None}
+    state = _state()
     _scrape_openai(
-        b'data: {"choices":[{"delta":{}}],"usage":{"prompt_tokens":11,"completion_tokens":4}}\n\n',
+        b'data: {"choices":[{"delta":{}}],"usage":{"prompt_tokens":11,"completion_tokens":4,'
+        b'"prompt_tokens_details":{"cached_tokens":8}}}\n\n',
         state,
     )
-    assert state["input"] == 11
+    assert state["prompt_total"] == 11
+    assert state["read"] == 8 and state["fresh"] == 3  # full prompt minus cached
     assert state["output"] == 4
 
 
 def test_scrape_anthropic_reads_exact_usage_and_text():
-    state = {"text": [], "input": None, "output": None}
+    state = _state()
     _scrape_anthropic(
         b'data: {"type":"message_start","message":'
         b'{"usage":{"input_tokens":40,"output_tokens":1}}}\n\n',
@@ -35,14 +44,28 @@ def test_scrape_anthropic_reads_exact_usage_and_text():
     _scrape_anthropic(
         b'data: {"type":"message_delta","delta":{},"usage":{"output_tokens":9}}\n\n', state
     )
-    assert state["input"] == 40
+    assert state["fresh"] == 40 and state["prompt_total"] == 40
     assert state["output"] == 9
     assert "".join(state["text"]) == "Hi"
 
 
+def test_scrape_anthropic_reads_cache_tokens():
+    state = _state()
+    _scrape_anthropic(
+        b'data: {"type":"message_start","message":{"usage":'
+        b'{"input_tokens":700,"cache_read_input_tokens":85700,'
+        b'"cache_creation_input_tokens":7600,"output_tokens":1}}}\n\n',
+        state,
+    )
+    assert state["fresh"] == 700
+    assert state["read"] == 85700
+    assert state["write"] == 7600
+    assert state["prompt_total"] == 700 + 85700 + 7600
+
+
 def test_scrape_ignores_malformed_lines():
-    state = {"text": [], "input": None, "output": None}
+    state = _state()
     _scrape_openai(b"data: not-json\n\nrandom noise\n", state)
     _scrape_anthropic(b"event: ping\ndata: {bad}\n\n", state)
     assert state["text"] == []
-    assert state["input"] is None
+    assert state["fresh"] is None

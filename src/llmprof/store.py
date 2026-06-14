@@ -103,7 +103,8 @@ CREATE TABLE IF NOT EXISTS traces (
     msg_fp TEXT,
     route TEXT,
     analysis TEXT,
-    reclaimable_usd REAL
+    reclaimable_usd REAL,
+    cache_write_tokens INTEGER
 );
 """
 
@@ -150,6 +151,8 @@ class SQLiteStore(BaseStore):
                 conn.execute("ALTER TABLE traces ADD COLUMN analysis TEXT")
             if "reclaimable_usd" not in cols:
                 conn.execute("ALTER TABLE traces ADD COLUMN reclaimable_usd REAL")
+            if "cache_write_tokens" not in cols:
+                conn.execute("ALTER TABLE traces ADD COLUMN cache_write_tokens INTEGER")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_traces_session ON traces (session_id)"
             )
@@ -191,8 +194,8 @@ class SQLiteStore(BaseStore):
                    (ts, provider, model, endpoint, status, prompt_tokens,
                     completion_tokens, total_tokens, cost_usd, streamed, components, detail,
                     cached_tokens, called_tools, session_id, turn, msg_fp, route,
-                    analysis, reclaimable_usd)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    analysis, reclaimable_usd, cache_write_tokens)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     trace.get("ts", time.time()),
                     trace.get("provider"),
@@ -214,6 +217,7 @@ class SQLiteStore(BaseStore):
                     trace.get("route"),
                     json.dumps(trace.get("analysis")) if trace.get("analysis") else None,
                     trace.get("reclaimable_usd"),
+                    trace.get("cache_write_tokens"),
                 ),
             )
 

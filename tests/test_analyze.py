@@ -48,6 +48,16 @@ def test_analyze_caching_tip_for_uncached_prefix():
     assert tip["reclaimable_tokens"] == 0
 
 
+def test_analyze_does_not_suggest_caching_when_already_caching():
+    # a big stable prefix that WOULD trigger the caching tip if uncached...
+    tree = _tree(system=1200, tools=(("a", 300),))
+    # ...but this call is a cache write (caching is in use), so do not suggest it
+    res = analyze.analyze(tree, texts=[], input_per_1k=0.0025, cached_tokens=0, cache_write=1000)
+    titles = [f["title"] for f in res["findings"]]
+    assert not any("not cached" in t for t in titles)
+    assert any("caching is active" in t for t in titles)
+
+
 def test_analyze_clean_context():
     tree = {"name": "context", "tokens": 120,
             "children": [{"name": "system prompt", "tokens": 60, "children": []},
