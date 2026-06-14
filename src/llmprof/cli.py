@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import socket
+
 import typer
 from rich.console import Console
 from rich.panel import Panel
@@ -14,15 +16,36 @@ app = typer.Typer(add_completion=False, help="pprof for your LLM context.")
 console = Console()
 
 
+def _port_available(host: str, port: int) -> bool:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind((host, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
 @app.command()
 def up(
-    host: str = typer.Option("127.0.0.1", help="Host to bind."),
-    port: int = typer.Option(4000, help="Port to bind."),
+    host: str = typer.Option("127.0.0.1", "--host", envvar="LLMPROF_HOST", help="Host to bind."),
+    port: int = typer.Option(4000, "--port", envvar="LLMPROF_PORT", help="Port to bind."),
     upstream: str = typer.Option(
-        None, help="Upstream API base URL (default: OpenAI, or $LLMPROF_UPSTREAM)."
+        None, "--upstream", envvar="LLMPROF_UPSTREAM",
+        help="Upstream API base URL (default: OpenAI). Point this at any "
+        "OpenAI-compatible provider, or https://api.anthropic.com.",
     ),
 ):
     """Start the profiling proxy."""
+    if not _port_available(host, port):
+        console.print(
+            f"[red]Port {port} on {host} is already in use.[/]\n"
+            f"Pick another, e.g. [bold]llmprof up --port {port + 1}[/], "
+            f"or set [bold]LLMPROF_PORT[/]."
+        )
+        raise typer.Exit(code=1)
+
     import uvicorn
 
     from .proxy import create_app
