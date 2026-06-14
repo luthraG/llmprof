@@ -12,7 +12,8 @@ are set.
 | --- | --- | --- |
 | `LLMPROF_HOST` | `127.0.0.1` | Host the proxy binds to. |
 | `LLMPROF_PORT` | `4000` | Port the proxy binds to. |
-| `LLMPROF_UPSTREAM` | `https://api.openai.com` | The real provider to forward to. Set to `https://api.anthropic.com` for Anthropic, or any OpenAI-compatible base URL. |
+| `LLMPROF_UPSTREAM` | `https://api.openai.com` | The OpenAI-compatible upstream (OpenAI, Groq, Together, ...). |
+| `LLMPROF_ANTHROPIC_UPSTREAM` | `https://api.anthropic.com` | The Anthropic upstream. |
 | `LLMPROF_HOME` | `~/.llmprof` | Directory for the SQLite database. |
 | `LLMPROF_DB_URL` | _(unset)_ | Storage backend URL (`sqlite://...`, `postgresql://...`). Overrides `LLMPROF_HOME`. See [Storage backends](../storage/). |
 | `LLMPROF_PRICING` | _(unset)_ | Path to a JSON file of price overrides. See [Providers & pricing](../pricing/). |
@@ -26,9 +27,14 @@ are set.
 | `--host` | `LLMPROF_HOST` | `127.0.0.1` |
 | `--port` | `LLMPROF_PORT` | `4000` |
 | `--upstream` | `LLMPROF_UPSTREAM` | OpenAI |
+| `--anthropic-upstream` | `LLMPROF_ANTHROPIC_UPSTREAM` | Anthropic |
+
+A single instance routes each request to the right upstream by endpoint, so it
+profiles OpenAI and Anthropic clients (e.g. Codex and Claude Code) at the same
+time. `--upstream` only changes the OpenAI-compatible target.
 
 ```bash
-llmprof up --host 0.0.0.0 --port 4100 --upstream https://api.anthropic.com
+llmprof up --host 0.0.0.0 --port 4100 --upstream https://api.groq.com/openai
 ```
 
 ## Per-request: grouping a run
@@ -41,7 +47,8 @@ the automatic prefix-chaining heuristic.
 
 With the proxy running on port 4000:
 
-- `POST /v1/chat/completions` - OpenAI-format calls (captured).
+- `POST /v1/chat/completions` - OpenAI chat calls (captured).
+- `POST /v1/responses` - OpenAI Responses API, used by Codex (captured).
 - `POST /v1/messages` - Anthropic-format calls (captured).
 - `POST /llmprof/api/ingest` - record a trace from labeled components; used by
   the [JS/TS SDK](../../sdk/javascript/) and any non-Python client.

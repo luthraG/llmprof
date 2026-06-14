@@ -3,8 +3,8 @@ title: Codex CLI
 description: Profile OpenAI's Codex CLI by pointing it at llmprof.
 ---
 
-The Codex CLI talks to an OpenAI-compatible endpoint, so you can route it through
-llmprof the same way as any OpenAI client.
+The Codex CLI defaults to OpenAI's Responses API (`/v1/responses`), which llmprof
+captures natively - so you just point Codex at the proxy, no wire-protocol changes.
 
 ## Steps
 
@@ -12,22 +12,20 @@ import { Steps } from '@astrojs/starlight/components';
 
 <Steps>
 
-1. **Start the proxy** (forwards to OpenAI by default):
+1. **Start the proxy** (one instance handles OpenAI and Anthropic):
 
    ```bash
    llmprof up
    ```
 
-2. **Point Codex at the proxy.** The simplest way is the base-URL environment
-   variable Codex inherits from the OpenAI client:
+2. **Point Codex at the proxy** with the base-URL environment variable:
 
    ```bash
    export OPENAI_BASE_URL=http://localhost:4000/v1
    codex
    ```
 
-   If you configure providers in `~/.codex/config.toml`, set the base URL there
-   instead:
+   Or set it in `~/.codex/config.toml`:
 
    ```toml
    [model_providers.llmprof]
@@ -35,13 +33,20 @@ import { Steps } from '@astrojs/starlight/components';
    base_url = "http://localhost:4000/v1"
    ```
 
-   and select that provider when you run Codex.
+   and select that provider. Use an `OPENAI_API_KEY` (API billing) rather than a
+   ChatGPT login, since the login flow talks to a different backend the proxy
+   does not sit in front of.
 
 3. **Open [http://localhost:4000](http://localhost:4000)** and watch each Codex
    request break down by component. The [timeline](../../features/timeline/) view
    shows how a coding session's context grows.
 
 </Steps>
+
+:::note
+Both the Responses API and Chat Completions are captured, so Codex works whether
+it uses `/v1/responses` (default) or you set `wire_api = "chat"`.
+:::
 
 :::tip
 Codex sessions are tool-heavy. The [cost leaderboard](../../features/leaderboard/)

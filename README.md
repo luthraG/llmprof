@@ -55,11 +55,9 @@ client = OpenAI(base_url="http://localhost:4000/v1")  # the only change
 client.chat.completions.create(model="gpt-4o", messages=[...], tools=[...])
 ```
 
-For Anthropic, point the proxy upstream and set the base URL:
+One proxy profiles both providers (and Codex + Claude Code) at once - for
+Anthropic just set the base URL (no `/v1`):
 
-```bash
-llmprof up --upstream https://api.anthropic.com
-```
 ```python
 from anthropic import Anthropic
 client = Anthropic(base_url="http://localhost:4000")

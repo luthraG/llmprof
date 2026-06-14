@@ -7,11 +7,17 @@ llmprof speaks the Anthropic Messages API (`/v1/messages`) as well as OpenAI. It
 attributes the `system` prompt, message history, tool schemas, tool calls, and
 tool results, and reads Anthropic's `usage` (including cache reads).
 
-## Point the proxy upstream at Anthropic
+## Start the proxy
+
+One instance routes Anthropic and OpenAI traffic to their own upstreams, so no
+flags are needed:
 
 ```bash
-llmprof up --upstream https://api.anthropic.com
+llmprof up
 ```
+
+(To point at a non-default Anthropic-compatible host, use
+`--anthropic-upstream`.)
 
 ## Point the client's base URL at the proxy
 

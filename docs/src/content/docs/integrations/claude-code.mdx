@@ -13,10 +13,10 @@ import { Steps } from '@astrojs/starlight/components';
 
 <Steps>
 
-1. **Start the proxy pointed at Anthropic:**
+1. **Start the proxy** (one instance routes Anthropic and OpenAI automatically):
 
    ```bash
-   llmprof up --upstream https://api.anthropic.com
+   llmprof up
    ```
 
 2. **Tell Claude Code to use the proxy** via `ANTHROPIC_BASE_URL`, then run it as

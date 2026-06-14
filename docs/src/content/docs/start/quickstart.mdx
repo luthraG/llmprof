@@ -17,12 +17,8 @@ token.
    llmprof up
    ```
 
-   It listens on `http://localhost:4000` and forwards to OpenAI by default. For
-   Anthropic, point it upstream:
-
-   ```bash
-   llmprof up --upstream https://api.anthropic.com
-   ```
+   It listens on `http://localhost:4000` and routes each request to the right
+   provider, so one instance profiles both OpenAI and Anthropic clients.
 
 2. **Point your client at it.** Set the base URL to the proxy and leave your API
    key as-is.
