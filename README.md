@@ -2,9 +2,10 @@
 
 **pprof for your LLM context. See where every token and dollar goes.**
 
-> Early / work in progress (v0.0.1). The proxy, token attribution, cost
-> tracking, OpenAI + Anthropic support, and the CLI work today. The flame-graph
-> UI and waste detector are next.
+> v0.0.1. Working today: the proxy, per-component token attribution, cost
+> tracking (100+ models), OpenAI + Anthropic support, the dashboard (flame
+> graph, trends, context timeline, cost leaderboard), the waste detector, and
+> the Python SDK. Next: a JS/TS SDK and an `npx` launcher.
 
 Your billing dashboard and `/usage` are *meters*: they tell you *how much* you
 spent. `llmprof` is a *profiler*: it tells you **where** the tokens in each
@@ -17,8 +18,8 @@ why fly blind on the most expensive resource in your AI app, the context window?
 A single agent call can spend thousands of tokens on tool schemas and stale
 history before the user says anything, and nothing shows you the breakdown.
 `llmprof` sits in front of your LLM provider, attributes every request's tokens
-by component, prices the call, and (soon) flame-graphs it so the waste is
-obvious.
+by component, prices the call, and flame-graphs it so the waste is obvious, with
+a waste detector that flags what to cut.
 
 ## Quickstart (30 seconds)
 
@@ -48,7 +49,13 @@ llmprof traces
  gpt-4o      842           2    844   $0.0021  tool schemas (537)
 ```
 
+Or open the dashboard at <http://127.0.0.1:4000> for the context flame graph,
+day-over-day trends, the per-turn context timeline, the cost leaderboard, and the
+reclaimable-cost view.
+
 Everything runs locally. Your prompts and keys never leave your machine.
+
+Full documentation: <https://luthrag.github.io/llmprof>
 
 ## Works with
 
@@ -87,6 +94,7 @@ provider-agnostic:
 | Upstream API | `--upstream` | `LLMPROF_UPSTREAM` | OpenAI |
 | Price overrides | | `LLMPROF_PRICING` | built-in table |
 | Data dir | | `LLMPROF_HOME` | `~/.llmprof` |
+| Storage backend | | `LLMPROF_DB_URL` | SQLite (local file) |
 
 Port already taken? `llmprof up --port 4100`.
 
@@ -99,11 +107,12 @@ their tokens recorded; only the dollar figure is omitted.
 - [x] OpenAI-compatible profiling proxy (streaming supported)
 - [x] Anthropic Messages API (`/v1/messages`) attribution, with exact usage from the stream
 - [x] Per-component token attribution (system / tools / history / input / tool calls / tool results)
-- [x] Cost estimation with a user-overridable pricing table
-- [x] Local SQLite trace store + `llmprof traces`
-- [ ] Flame-graph web UI (the wow) + context-growth timeline
-- [ ] Waste detector ("~$X/mo reclaimable")
-- [ ] SDK decorators for precise RAG / tool / step labels (Python, then JS/TS)
+- [x] Cost estimation with a user-overridable pricing table (100+ models)
+- [x] Local SQLite trace store + `llmprof traces`, with a pluggable storage backend
+- [x] Dashboard: context flame graph, day-over-day trends, context-growth timeline, cost leaderboard
+- [x] Waste detector with a "$X/mo reclaimable" headline
+- [x] Python SDK for precise RAG / tool / step labels
+- [ ] JavaScript / TypeScript SDK
 - [ ] `npx llmprof` launcher for non-Python users
 
 ## What llmprof is not
