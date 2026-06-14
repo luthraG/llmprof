@@ -335,11 +335,38 @@ function renderDetail(t) {
      <div class="panel">
        <div class="panel-title">breakdown</div>
        <div class="legend" id="legend"></div>
+     </div>
+     <div class="panel" id="tools-panel" style="display:none">
+       <div class="panel-title"><span>tools</span><span class="pill" id="tools-count"></span></div>
+       <div class="legend" id="tools-list"></div>
      </div>`;
   renderInsight(tree);
   drawFlame(tree);
   drawLegend(tree);
   renderSuggestions(tree, t);
+  renderTools(tree, t);
+}
+
+function renderTools(tree, t) {
+  const panel = $("#tools-panel"), el = $("#tools-list");
+  if (!panel || !el) return;
+  const tsNode = (tree.children || []).find(c => c.name === "tool schemas");
+  const tools = tsNode && tsNode.children ? [...tsNode.children].sort((a,b)=>b.tokens-a.tokens) : [];
+  if (!tools.length) { panel.style.display = "none"; return; }
+  panel.style.display = "";
+  const inP = t.input_per_1k;
+  const total = tree.tokens || 1;
+  $("#tools-count").textContent =
+    `${tools.length} tools, ${tsNode.tokens.toLocaleString()} tok` +
+    (inP != null ? ` (${money(tsNode.tokens/1000*inP)}/call)` : "");
+  el.innerHTML = tools.map(n => {
+    const cost = inP != null ? money(n.tokens/1000*inP) : "";
+    return `<div class="leg"><span class="sw" style="background:${nodeColor(n, tsNode)}"></span>`+
+      `<span class="lname">${esc(n.name)}</span>`+
+      `<span class="ltok num">${n.tokens.toLocaleString()}</span>`+
+      `<span class="lpct">${(n.tokens/total*100).toFixed(1)}%</span>`+
+      `<span class="lcost">${cost}</span></div>`;
+  }).join("");
 }
 
 function renderSuggestions(tree, t) {
