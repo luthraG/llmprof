@@ -80,9 +80,34 @@ def _match(model: str | None) -> tuple[float, float] | None:
     return None
 
 
+# approximate context-window sizes (tokens), substring-matched like prices
+CONTEXT_WINDOWS: dict[str, int] = {
+    "gpt-4.1": 1047576,
+    "gpt-4o-mini": 128000, "gpt-4o": 128000, "gpt-4-turbo": 128000, "gpt-4": 8192,
+    "gpt-3.5-turbo": 16385,
+    "o4-mini": 200000, "o3-mini": 200000, "o3": 200000, "o1-mini": 128000, "o1": 200000,
+    "claude-3-5-sonnet": 200000, "claude-3-7-sonnet": 200000, "claude-3-5-haiku": 200000,
+    "claude-3-opus": 200000, "claude-3-haiku": 200000,
+    "claude-sonnet-4": 200000, "claude-opus-4": 200000, "claude-haiku-4": 200000,
+    "gemini-1.5-pro": 2000000, "gemini-1.5-flash": 1000000, "gemini-2.0-flash": 1000000,
+    "deepseek-chat": 64000, "deepseek-reasoner": 64000, "mistral-large": 128000,
+}
+
+
 def rates(model: str | None) -> tuple[float, float] | None:
     """(input_per_1k, output_per_1k) for a model, or None if unknown."""
     return _match(model)
+
+
+def context_window(model: str | None) -> int | None:
+    """The model's context window in tokens, or None if unknown."""
+    if not model:
+        return None
+    m = model.lower()
+    for key in sorted(CONTEXT_WINDOWS, key=len, reverse=True):
+        if key in m:
+            return CONTEXT_WINDOWS[key]
+    return None
 
 
 def cost(model: str | None, prompt_tokens: int, completion_tokens: int) -> float | None:

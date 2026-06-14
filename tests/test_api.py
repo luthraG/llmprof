@@ -66,6 +66,7 @@ def test_api_traces_list_and_detail(tmp_path):
     assert any(c["name"] == "search" for c in ts["children"])
     # the detail carries the model's input rate so the UI can price each frame
     assert detail["input_per_1k"] == 0.0025  # gpt-4o
+    assert detail["context_window"] == 128000  # gpt-4o
 
 
 def test_api_trace_404(tmp_path):

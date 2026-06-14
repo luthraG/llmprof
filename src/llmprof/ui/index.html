@@ -84,6 +84,11 @@
   .stat span { font-size: 10.5px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.06em; }
   .stat.cost b { color: var(--accent-2); }
 
+  .wgauge { display: flex; align-items: center; gap: 12px; margin: 0 0 18px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .wgauge .glabel { color: var(--faint); text-transform: uppercase; letter-spacing: 0.06em; font-size: 10.5px; }
+  .wgauge .bar { flex: 1; max-width: 460px; height: 6px; background: var(--bg-2); border-radius: 3px; overflow: hidden; }
+  .wgauge .bar i { display: block; height: 100%; border-radius: 3px; }
+
   .detail-head, .panel, .insight { animation: rise 0.28s cubic-bezier(0.22,1,0.36,1) both; }
   @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
   .insight {
@@ -355,6 +360,7 @@ function renderDetail(t) {
        </div>
      </div>
      <div id="insight"></div>
+     <div id="wgauge"></div>
      <div class="panel">
        <div class="panel-title"><span>context flame graph</span><span class="crumbs" id="crumbs"></span></div>
        <div id="flame"></div>
@@ -372,10 +378,25 @@ function renderDetail(t) {
        <div class="legend" id="tools-list"></div>
      </div>`;
   renderInsight(tree);
+  renderWindow(t);
   drawFlame(tree);
   drawLegend(tree);
   renderSuggestions(tree, t);
   renderTools(tree, t);
+}
+
+function renderWindow(t) {
+  const el = $("#wgauge"); if (!el) return;
+  const w = t.context_window;
+  if (!w) { el.innerHTML = ""; return; }
+  const used = t.total_tokens || 0;
+  const pct = Math.min(100, used / w * 100);
+  const color = pct >= 90 ? "#e5534b" : pct >= 75 ? "var(--amber)" : "var(--accent)";
+  const pctTxt = pct < 0.1 ? "<0.1" : pct.toFixed(1);
+  el.innerHTML =
+    `<div class="wgauge"><span class="glabel">context window</span>`+
+    `<div class="bar"><i style="width:${Math.max(pct,0.6).toFixed(2)}%;background:${color}"></i></div>`+
+    `<span>${used.toLocaleString()} / ${fmt(w)} tokens (${pctTxt}%)</span></div>`;
 }
 
 function renderTools(tree, t) {

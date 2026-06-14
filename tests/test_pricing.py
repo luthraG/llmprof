@@ -24,6 +24,13 @@ def test_runtime_register_override():
     assert pricing.cost("provider/test-only-model-xyz", 1000, 1000) == round(0.5 + 1.0, 6)
 
 
+def test_context_window_lookup():
+    assert pricing.context_window("gpt-4o") == 128000
+    assert pricing.context_window("claude-3-5-sonnet-20241022") == 200000
+    assert pricing.context_window("gpt-4o-mini") == 128000  # longest match
+    assert pricing.context_window("totally-unknown") is None
+
+
 def test_load_overrides_from_json(tmp_path):
     path = tmp_path / "prices.json"
     path.write_text(json.dumps({"acme-llm-7b": [0.01, 0.02]}))

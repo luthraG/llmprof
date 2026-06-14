@@ -68,6 +68,7 @@ def create_app(db_path: str | None = None, upstream: str | None = None) -> FastA
         rate = pricing.rates(trace.get("model"))
         trace["input_per_1k"] = rate[0] if rate else None
         trace["output_per_1k"] = rate[1] if rate else None
+        trace["context_window"] = pricing.context_window(trace.get("model"))
         return trace
 
     @app.post("/v1/chat/completions")
