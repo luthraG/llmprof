@@ -71,6 +71,13 @@ def create_app(db_path: str | None = None, upstream: str | None = None) -> FastA
     async def api_traces(limit: int = 100) -> dict:
         return {"traces": app.state.store.recent(limit), "upstream": app.state.upstream}
 
+    @app.get("/llmprof/api/summary")
+    async def api_summary() -> dict:
+        return {
+            "days": app.state.store.daily_summary(),
+            "models": app.state.store.model_summary(),
+        }
+
     @app.get("/llmprof/api/traces/{trace_id}")
     async def api_trace(trace_id: int) -> dict:
         trace = app.state.store.get(trace_id)

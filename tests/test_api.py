@@ -81,6 +81,16 @@ def test_api_traces_list_and_detail(tmp_path):
     assert detail["context_window"] == 128000  # gpt-4o
 
 
+def test_api_summary(tmp_path):
+    client = _app_with_one_trace(tmp_path)
+    s = client.get("/llmprof/api/summary").json()
+    assert "days" in s and "models" in s
+    assert len(s["days"]) >= 1
+    day = s["days"][-1]
+    assert day["calls"] == 1 and day["tokens"] > 0
+    assert any(m["model"] == "gpt-4o" for m in s["models"])
+
+
 def test_api_trace_404(tmp_path):
     client = _app_with_one_trace(tmp_path)
     assert client.get("/llmprof/api/traces/999999").status_code == 404

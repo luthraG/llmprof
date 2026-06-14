@@ -111,3 +111,26 @@ class Store:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM traces WHERE id = ?", (trace_id,)).fetchone()
         return self._row(row, with_detail=True) if row else None
+
+    def daily_summary(self, days: int = 30) -> list[dict]:
+        """Per-day totals (oldest to newest), for trend charts."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT date(ts, 'unixepoch') AS day, COUNT(*) AS calls,
+                          COALESCE(SUM(total_tokens), 0) AS tokens,
+                          COALESCE(SUM(cost_usd), 0) AS cost
+                   FROM traces GROUP BY day ORDER BY day DESC LIMIT ?""",
+                (days,),
+            ).fetchall()
+        return [dict(r) for r in reversed(rows)]
+
+    def model_summary(self) -> list[dict]:
+        """Per-model totals, most expensive first."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT model, COUNT(*) AS calls,
+                          COALESCE(SUM(total_tokens), 0) AS tokens,
+                          COALESCE(SUM(cost_usd), 0) AS cost
+                   FROM traces GROUP BY model ORDER BY cost DESC""",
+            ).fetchall()
+        return [dict(r) for r in rows]

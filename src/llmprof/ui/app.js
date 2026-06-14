@@ -25,6 +25,7 @@ let focusPath = [];   // array of nodes from root to current focus
 let CURRENT_TRACE = null;
 let sortBy = "recent";
 let modelFilter = "";
+let view = "calls";  // "calls" | "trends"
 
 async function load() {
   const r = await fetch("/llmprof/api/traces?limit=100");
@@ -33,9 +34,63 @@ async function load() {
   $("#upstream").textContent = (data.upstream || "").replace(/^https?:\/\//, "");
   renderKpis();
   renderCalls();
+  if (view === "trends") { renderTrends(); return; }
   if (selectedId == null && TRACES.length) select(TRACES[0].id);
   else if (selectedId != null && !TRACES.find(t => t.id === selectedId) && TRACES.length) select(TRACES[0].id);
   else if (!TRACES.length) renderEmpty();
+}
+
+async function renderTrends() {
+  const main = $("#main");
+  let s;
+  try { s = await (await fetch("/llmprof/api/summary")).json(); }
+  catch (e) { return; }
+  const days = s.days || [], models = s.models || [];
+  if (!days.length) {
+    main.innerHTML = `<div class="empty"><h2>No data yet</h2><div>Capture a few calls to see daily trends.</div></div>`;
+    return;
+  }
+  const today = days[days.length - 1], yest = days[days.length - 2] || { cost: 0, calls: 0, tokens: 0 };
+  const delta = (cur, prev) => {
+    if (!prev) return cur ? `<span class="delta up">new today</span>` : `<span class="delta flat">no prior day</span>`;
+    const pct = (cur - prev) / prev * 100;
+    const cls = Math.abs(pct) < 1 ? "flat" : pct > 0 ? "up" : "down";
+    const arrow = pct > 0 ? "&#9650;" : pct < 0 ? "&#9660;" : "&middot;";
+    return `<span class="delta ${cls}">${arrow} ${Math.abs(pct).toFixed(0)}% vs yesterday</span>`;
+  };
+  const maxCost = Math.max(...days.map(d => d.cost), 1e-9);
+  const show = days.slice(-14);
+  const bars = show.map(d => {
+    const h = Math.max(3, Math.round(d.cost / maxCost * 140));
+    const label = d.day.slice(5);  // MM-DD
+    return `<div class="col" title="${d.day}: ${money(d.cost)} &middot; ${fmt(d.tokens)} tok &middot; ${d.calls} calls">`+
+           `<div class="bar" style="height:${h}px"></div><div class="day">${label}</div></div>`;
+  }).join("");
+  const modelRows = models.map(m =>
+    `<div class="leg"><span class="sw" style="background:${CAT['tool schemas']||'#7c84ff'}"></span>`+
+    `<span class="lname">${esc(m.model || 'unknown')}</span>`+
+    `<span class="ltok num">${fmt(m.tokens)} tok</span>`+
+    `<span class="lpct">${m.calls}&times;</span>`+
+    `<span class="lcost">${money(m.cost)}</span></div>`).join("");
+  main.innerHTML =
+    `<div class="detail-head"><div class="dh-title"><h1>Trends</h1>`+
+    `<div class="meta">daily usage across all captured calls</div></div></div>`+
+    `<div class="trends-cards">`+
+    `<div class="tcard cost"><div class="tlabel">today's cost</div><div class="tval">${money(today.cost)}</div>${delta(today.cost, yest.cost)}</div>`+
+    `<div class="tcard"><div class="tlabel">today's calls</div><div class="tval">${today.calls}</div>${delta(today.calls, yest.calls)}</div>`+
+    `<div class="tcard"><div class="tlabel">today's tokens</div><div class="tval">${fmt(today.tokens)}</div>${delta(today.tokens, yest.tokens)}</div>`+
+    `</div>`+
+    `<div class="panel"><div class="panel-title">cost per day (last ${show.length})</div><div class="barchart">${bars}</div></div>`+
+    `<div class="panel"><div class="panel-title"><span>by model</span><span class="pill">${models.length}</span></div><div class="legend" style="grid-template-columns:1fr">${modelRows}</div></div>`;
+}
+
+function setView(v) {
+  view = v;
+  document.querySelectorAll("#viewToggle button").forEach(b => b.classList.toggle("seg-on", b.dataset.view === v));
+  if (v === "trends") renderTrends();
+  else if (selectedId != null) select(selectedId);
+  else if (TRACES.length) select(TRACES[0].id);
+  else renderEmpty();
 }
 
 function renderKpis() {
@@ -158,6 +213,10 @@ function renderCalls() {
 
 async function select(id) {
   selectedId = id;
+  if (view !== "calls") {
+    view = "calls";
+    document.querySelectorAll("#viewToggle button").forEach(b => b.classList.toggle("seg-on", b.dataset.view === "calls"));
+  }
   focusPath = [];
   renderCalls();
   document.body.classList.remove("nav-open");  // close the mobile drawer
@@ -474,6 +533,9 @@ if (menuBtn) menuBtn.addEventListener("click", (e) => {
 });
 const scrim = $("#scrim");
 if (scrim) scrim.addEventListener("click", () => document.body.classList.remove("nav-open"));
+
+document.querySelectorAll("#viewToggle button").forEach(b =>
+  b.addEventListener("click", () => setView(b.dataset.view)));
 
 load();
 setInterval(load, 4000);
