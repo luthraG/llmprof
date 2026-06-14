@@ -36,7 +36,9 @@ CREATE TABLE IF NOT EXISTS traces (
     session_id TEXT,
     turn INTEGER,
     msg_fp TEXT,
-    route TEXT
+    route TEXT,
+    analysis TEXT,
+    reclaimable_usd REAL
 );
 """
 
@@ -77,6 +79,10 @@ class Store:
                 conn.execute("ALTER TABLE traces ADD COLUMN msg_fp TEXT")
             if "route" not in cols:
                 conn.execute("ALTER TABLE traces ADD COLUMN route TEXT")
+            if "analysis" not in cols:
+                conn.execute("ALTER TABLE traces ADD COLUMN analysis TEXT")
+            if "reclaimable_usd" not in cols:
+                conn.execute("ALTER TABLE traces ADD COLUMN reclaimable_usd REAL")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_traces_session ON traces (session_id)"
             )
@@ -117,8 +123,9 @@ class Store:
                 """INSERT INTO traces
                    (ts, provider, model, endpoint, status, prompt_tokens,
                     completion_tokens, total_tokens, cost_usd, streamed, components, detail,
-                    cached_tokens, called_tools, session_id, turn, msg_fp, route)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    cached_tokens, called_tools, session_id, turn, msg_fp, route,
+                    analysis, reclaimable_usd)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     trace.get("ts", time.time()),
                     trace.get("provider"),
@@ -138,6 +145,8 @@ class Store:
                     turn,
                     json.dumps(fp) if fp else None,
                     trace.get("route"),
+                    json.dumps(trace.get("analysis")) if trace.get("analysis") else None,
+                    trace.get("reclaimable_usd"),
                 ),
             )
 
@@ -147,8 +156,10 @@ class Store:
         d["called_tools"] = json.loads(d.get("called_tools") or "[]")
         d.pop("msg_fp", None)  # internal fingerprint, never exposed
         detail = d.pop("detail", None)
+        analysis = d.pop("analysis", None)
         if with_detail:
             d["detail"] = json.loads(detail) if detail else None
+            d["analysis"] = json.loads(analysis) if analysis else None
         return d
 
     def recent(self, limit: int = 50) -> list[dict]:
@@ -206,6 +217,29 @@ class Store:
             d["components"] = json.loads(d.get("components") or "{}")
             out.append(d)
         return out
+
+    def reclaimable_summary(self) -> dict:
+        """Total reclaimable spend across recorded calls, projected to a month
+        from the observed call rate. The headline savings number."""
+        with self._connect() as conn:
+            r = conn.execute(
+                """SELECT COUNT(*) AS calls,
+                          COALESCE(SUM(reclaimable_usd), 0) AS reclaimable,
+                          COALESCE(SUM(cost_usd), 0) AS cost,
+                          MIN(ts) AS first_ts, MAX(ts) AS last_ts
+                   FROM traces WHERE reclaimable_usd IS NOT NULL"""
+            ).fetchone()
+        calls = r["calls"] or 0
+        reclaimable, cost = r["reclaimable"] or 0.0, r["cost"] or 0.0
+        span_days = max((r["last_ts"] or 0) - (r["first_ts"] or 0), 0) / 86400 or 1
+        return {
+            "calls": calls,
+            "reclaimable_usd": round(reclaimable, 6),
+            "cost_usd": round(cost, 6),
+            "pct": round(reclaimable / cost * 100, 1) if cost else 0,
+            "monthly_reclaimable_usd": round(reclaimable / span_days * 30, 2),
+            "monthly_calls": int(calls / span_days * 30),
+        }
 
     def routes(self, limit: int = 15) -> list[dict]:
         """Most expensive prompt templates (system prompt + tool set), so you can

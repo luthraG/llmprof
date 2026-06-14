@@ -232,6 +232,26 @@ def message_fingerprint(payload: dict | None, provider: str) -> list[str]:
     return fps
 
 
+def content_blocks(payload: dict | None, provider: str) -> list[str]:
+    """Flat list of the request's content strings (messages + tool schemas), for
+    duplicate detection. Each message and each tool schema is one block."""
+    payload = payload or {}
+    blocks: list[str] = []
+    if provider == "anthropic":
+        system = payload.get("system")
+        if system:
+            blocks.append(system if isinstance(system, str) else " ".join(
+                b.get("text", "") for b in system if isinstance(b, dict)))
+        for message in payload.get("messages") or []:
+            blocks.append(" ".join(t for _, t in _anthropic_message_parts(message)))
+    else:
+        for message in payload.get("messages") or []:
+            blocks.append(_openai_message_text(message))
+    for tool in payload.get("tools") or payload.get("functions") or []:
+        blocks.append(_json(tool))
+    return [b for b in blocks if b]
+
+
 def route_label(payload: dict | None, provider: str) -> str:
     """A short, human-readable signature of a call's reusable template: the start
     of the system prompt plus how many tools it ships. Calls that share this are

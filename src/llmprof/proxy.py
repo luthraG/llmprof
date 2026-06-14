@@ -24,7 +24,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
-from . import pricing, tokens
+from . import analyze, pricing, tokens
 from .store import Store
 
 DEFAULT_UPSTREAM = os.environ.get("LLMPROF_UPSTREAM", "https://api.openai.com")
@@ -77,6 +77,7 @@ def create_app(db_path: str | None = None, upstream: str | None = None) -> FastA
             "days": app.state.store.daily_summary(),
             "models": app.state.store.model_summary(),
             "routes": app.state.store.routes(),
+            "reclaimable": app.state.store.reclaimable_summary(),
         }
 
     @app.get("/llmprof/api/sessions")
@@ -307,6 +308,12 @@ def _record_blocking(app, provider, model, payload, usage_in, usage_out, cached,
         else tokens.count_tokens(completion_text or "", model)
     )
     total = (prompt_tokens or 0) + (completion_tokens or 0)
+    rate = pricing.rates(model)
+    analysis = analyze.analyze(
+        breakdown["tree"], tokens.content_blocks(payload, provider),
+        input_per_1k=rate[0] if rate else None, cached_tokens=cached,
+        called_tools=called_tools, model=model or "gpt-4o",
+    )
     app.state.store.record(
         {
             "ts": started,
@@ -326,6 +333,8 @@ def _record_blocking(app, provider, model, payload, usage_in, usage_out, cached,
             "msg_fp": msg_fp,
             "session_hint": session_hint,
             "route": route,
+            "analysis": analysis,
+            "reclaimable_usd": analysis["reclaimable_usd"],
         }
     )
 

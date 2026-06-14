@@ -103,6 +103,9 @@ def test_api_traces_list_and_detail(tmp_path):
     # the detail carries the model's input rate so the UI can price each frame
     assert detail["input_per_1k"] == 0.0025  # gpt-4o
     assert detail["context_window"] == 128000  # gpt-4o
+    # the waste detector ran at record time and is served with the detail
+    assert detail["analysis"] and "findings" in detail["analysis"]
+    assert "reclaimable_usd" in detail["analysis"]
 
 
 def test_api_summary(tmp_path):
@@ -114,6 +117,8 @@ def test_api_summary(tmp_path):
     assert day["calls"] == 1 and day["tokens"] > 0
     assert any(m["model"] == "gpt-4o" for m in s["models"])
     assert s["routes"] and "+1 tools" in s["routes"][0]["route"]
+    assert "reclaimable" in s and s["reclaimable"]["calls"] == 1
+    assert "monthly_reclaimable_usd" in s["reclaimable"]
 
 
 def test_api_routes_leaderboard(tmp_path):

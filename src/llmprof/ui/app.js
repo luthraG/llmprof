@@ -58,6 +58,7 @@ async function renderTrends(force) {
   try { s = await (await fetch("/llmprof/api/summary")).json(); }
   catch (e) { return; }
   const days = s.days || [], models = s.models || [], routes = s.routes || [];
+  const rec = s.reclaimable || {};
   if (!days.length) {
     main.innerHTML = `<div class="empty"><h2>No data yet</h2><div>Capture a few calls to see daily trends.</div></div>`;
     return;
@@ -96,9 +97,19 @@ async function renderTrends(force) {
     ? `<div class="panel"><div class="panel-title"><span>most expensive prompts</span><span class="pill">${routes.length}</span></div>`+
       `<div class="routes">${routeRows}</div></div>`
     : "";
+  const flameIcon = '<svg width="34" height="34" viewBox="0 0 24 24" fill="#f7a13b"><path d="M13 2c.9 3.2-2.2 4.3-2.2 7.4a2.8 2.8 0 005.6.2c0-1-.4-1.9-1-2.8 2.2 1 4 3.2 4 6.1A7.4 7.4 0 015 13.2C5 8.6 9.4 6.6 13 2z"/></svg>';
+  const recBanner = (rec.reclaimable_usd > 0)
+    ? `<div class="reclaim-banner"><span class="rb-ic">${flameIcon}</span>`+
+      `<div class="rb-main"><div class="rb-label">reclaimable / mo</div>`+
+      `<div class="rb-val">${money(rec.monthly_reclaimable_usd)}</div></div>`+
+      `<div class="rb-meta"><span>~${rec.pct}% of spend</span>`+
+      `<span>projected from ${fmt(rec.monthly_calls)} calls/mo</span>`+
+      `<span>${fmt(rec.calls)} calls analyzed</span></div></div>`
+    : "";
   main.innerHTML =
     `<div class="detail-head"><div class="dh-title"><h1>Trends</h1>`+
     `<div class="meta">daily usage across all captured calls</div></div></div>`+
+    recBanner+
     `<div class="trends-cards">`+
     `<div class="tcard cost"><div class="tlabel">today's cost</div><div class="tval">${money(today.cost)}</div>${delta(today.cost, yest.cost)}</div>`+
     `<div class="tcard"><div class="tlabel">today's calls</div><div class="tval">${today.calls}</div>${delta(today.calls, yest.calls)}</div>`+
@@ -420,51 +431,30 @@ function renderTools(tree, t) {
   }).join("");
 }
 
+const OPT_ICON = {
+  warn: '<svg width="16" height="16" viewBox="0 0 24 24" fill="#f7a13b"><path d="M12 4l9 16H3z"/></svg>',
+  tip: '<svg width="16" height="16" viewBox="0 0 24 24" fill="#7c84ff"><path d="M9 21h6v-1H9zM12 2a7 7 0 00-4 12.7V17h8v-2.3A7 7 0 0012 2z"/></svg>',
+  ok: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc97" stroke-width="2.4"><path d="M20 6L9 17l-5-5"/></svg>',
+};
+
+// the waste detector runs server-side (analyze.py); here we just render it
 function renderSuggestions(tree, t) {
   const el = $("#suggestions"); if (!el) return;
-  const inP = t.input_per_1k;
-  const total = tree.tokens || 1;
-  const comp = {};
-  for (const c of (tree.children || [])) comp[c.name] = c.tokens;
-  const save = (tok) => inP != null ? ` <span class="save">~${money(tok/1000*inP)}/call</span>` : "";
-  const out = [];
-  const ts = comp["tool schemas"] || 0;
-  if (ts / total >= 0.35)
-    out.push(["warn", `<b>Tool schemas are ${(ts/total*100).toFixed(0)}% of the context</b> (${ts.toLocaleString()} tok).${save(ts)} Trim descriptions, drop unused tools, or load schemas lazily.`]);
-  if (t.cached_tokens) {
-    const pctCached = (t.cached_tokens / (t.prompt_tokens || 1) * 100).toFixed(0);
-    out.push(["ok", `Prompt caching is active: <b>${t.cached_tokens.toLocaleString()} tokens</b> (${pctCached}% of the prompt) were served from cache on this call.`]);
-  }
-  const prefix = (comp["system prompt"] || 0) + ts;
-  if (prefix >= 1024 && !t.cached_tokens)  // suggest only if not already caching (min ~1k tokens)
-    out.push(["tip", `Your stable prefix (system prompt + tool schemas) is <b>${prefix.toLocaleString()} tokens</b> and repeats on every call. <b>Prompt caching</b> can cut ~90% off it on cache hits${inP != null ? `, saving <span class="save">~${money(prefix*0.9/1000*inP)}/call</span> after the first` : ""}.`]);
-  const hist = (comp["history (assistant)"] || 0) + (comp["tool results"] || 0);
-  if (hist / total >= 0.4)
-    out.push(["warn", `<b>History and tool results are ${(hist/total*100).toFixed(0)}% of the context</b> (${hist.toLocaleString()} tok).${save(hist)} Summarize or truncate older turns.`]);
-  if ((comp["system prompt"] || 0) >= 1500)
-    out.push(["tip", `System prompt is <b>${comp["system prompt"].toLocaleString()} tokens</b> of fixed overhead on every call.`]);
-  // tools defined but not called on this request
-  const tsNode = (tree.children || []).find(c => c.name === "tool schemas");
-  const called = new Set(t.called_tools || []);
-  if (tsNode && tsNode.children && called.size > 0) {
-    const unused = tsNode.children.filter(c => !called.has(c.name));
-    if (unused.length) {
-      const wasted = unused.reduce((a, c) => a + c.tokens, 0);
-      const names = unused.map(c => esc(c.name)).slice(0, 6).join(", ") + (unused.length > 6 ? ", ..." : "");
-      out.push(["warn", `<b>${unused.length} of ${tsNode.children.length} tools were not called</b> on this request (${names}): ${wasted.toLocaleString()} tok.${save(wasted)} If they are not needed here, drop them from the call.`]);
-    }
-  }
-  if (!out.length) out.push(["ok", "No obvious waste detected. This context looks lean."]);
-
-  const ICON = {
-    warn: '<svg width="16" height="16" viewBox="0 0 24 24" fill="#f7a13b"><path d="M12 4l9 16H3z"/></svg>',
-    tip: '<svg width="16" height="16" viewBox="0 0 24 24" fill="#7c84ff"><path d="M9 21h6v-1H9zM12 2a7 7 0 00-4 12.7V17h8v-2.3A7 7 0 0012 2z"/></svg>',
-    ok: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc97" stroke-width="2.4"><path d="M20 6L9 17l-5-5"/></svg>',
-  };
-  const count = out.filter(o => o[0] !== "ok").length;
+  const a = t.analysis;
+  const findings = (a && a.findings) || [{ severity: "ok", title: "No analysis available",
+    body: "This call was recorded before the waste detector shipped." }];
+  const count = findings.filter(f => f.severity !== "ok").length;
   $("#opt-count").textContent = count ? `${count} found` : "clean";
-  el.innerHTML = out.map(([sev, text]) =>
-    `<div class="sugg ${sev}"><span class="si">${ICON[sev]}</span><span class="stext">${text}</span></div>`).join("");
+  el.innerHTML = findings.map(f => {
+    const chip = f.save_usd ? ` <span class="save">~${money(f.save_usd)}/call</span>` : "";
+    return `<div class="sugg ${f.severity}"><span class="si">${OPT_ICON[f.severity] || OPT_ICON.tip}</span>`+
+      `<span class="stext"><b>${esc(f.title)}</b> ${esc(f.body)}${chip}</span></div>`;
+  }).join("");
+  if (a && (a.reclaimable_tokens || a.reclaimable_usd)) {
+    el.innerHTML += `<div class="reclaim-foot">reclaimable on this call: `+
+      `<b>${fmt(a.reclaimable_tokens)} tok</b>`+
+      `${a.reclaimable_usd ? ` &middot; <b class="save">~${money(a.reclaimable_usd)}</b>` : ""}</div>`;
+  }
 }
 
 function renderInsight(tree) {
