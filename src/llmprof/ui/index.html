@@ -335,6 +335,7 @@ function renderDetail(t) {
          <div class="stat"><b class="num">${fmt(t.prompt_tokens||0)}</b><span>prompt</span></div>
          <div class="stat"><b class="num">${fmt(t.completion_tokens||0)}</b><span>completion</span></div>
          <div class="stat"><b class="num">${fmt(t.total_tokens||0)}</b><span>total</span></div>
+         ${t.cached_tokens ? `<div class="stat"><b class="num" style="color:var(--accent-2)">${fmt(t.cached_tokens)}</b><span>cached</span></div>` : ''}
          <div class="stat cost"><b class="num">${money(t.cost_usd)}</b><span>${projection || 'est. cost'}</span></div>
        </div>
      </div>
@@ -395,8 +396,12 @@ function renderSuggestions(tree, t) {
   const ts = comp["tool schemas"] || 0;
   if (ts / total >= 0.35)
     out.push(["warn", `<b>Tool schemas are ${(ts/total*100).toFixed(0)}% of the context</b> (${ts.toLocaleString()} tok).${save(ts)} Trim descriptions, drop unused tools, or load schemas lazily.`]);
+  if (t.cached_tokens) {
+    const pctCached = (t.cached_tokens / (t.prompt_tokens || 1) * 100).toFixed(0);
+    out.push(["ok", `Prompt caching is active: <b>${t.cached_tokens.toLocaleString()} tokens</b> (${pctCached}% of the prompt) were served from cache on this call.`]);
+  }
   const prefix = (comp["system prompt"] || 0) + ts;
-  if (prefix >= 1024)  // provider prompt-caching minimums are around 1k tokens
+  if (prefix >= 1024 && !t.cached_tokens)  // suggest only if not already caching (min ~1k tokens)
     out.push(["tip", `Your stable prefix (system prompt + tool schemas) is <b>${prefix.toLocaleString()} tokens</b> and repeats on every call. <b>Prompt caching</b> can cut ~90% off it on cache hits${inP != null ? `, saving <span class="save">~${money(prefix*0.9/1000*inP)}/call</span> after the first` : ""}.`]);
   const hist = (comp["history (assistant)"] || 0) + (comp["tool results"] || 0);
   if (hist / total >= 0.4)

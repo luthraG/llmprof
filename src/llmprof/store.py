@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS traces (
     cost_usd REAL,
     streamed INTEGER,
     components TEXT,
-    detail TEXT
+    detail TEXT,
+    cached_tokens INTEGER
 );
 """
 
@@ -54,18 +55,21 @@ class Store:
             if self.path != ":memory:":
                 conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(_SCHEMA)
-            # migrate older databases that predate the detail column
+            # migrate older databases that predate newer columns
             cols = [r[1] for r in conn.execute("PRAGMA table_info(traces)")]
             if "detail" not in cols:
                 conn.execute("ALTER TABLE traces ADD COLUMN detail TEXT")
+            if "cached_tokens" not in cols:
+                conn.execute("ALTER TABLE traces ADD COLUMN cached_tokens INTEGER")
 
     def record(self, trace: dict) -> None:
         with self._connect() as conn:
             conn.execute(
                 """INSERT INTO traces
                    (ts, provider, model, endpoint, status, prompt_tokens,
-                    completion_tokens, total_tokens, cost_usd, streamed, components, detail)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    completion_tokens, total_tokens, cost_usd, streamed, components, detail,
+                    cached_tokens)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     trace.get("ts", time.time()),
                     trace.get("provider"),
@@ -79,6 +83,7 @@ class Store:
                     1 if trace.get("streamed") else 0,
                     json.dumps(trace.get("components") or {}),
                     json.dumps(trace.get("detail")) if trace.get("detail") else None,
+                    trace.get("cached_tokens"),
                 ),
             )
 

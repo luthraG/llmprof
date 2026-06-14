@@ -103,14 +103,17 @@ def _attribute(payload: dict, provider: str) -> dict:
     )
 
 
-def _usage_from_body(data: bytes, provider: str) -> tuple[int | None, int | None]:
+def _usage_from_body(data: bytes, provider: str) -> tuple[int | None, int | None, int | None]:
+    """Returns (prompt_tokens, completion_tokens, cached_tokens)."""
     try:
         usage = json.loads(data).get("usage") or {}
     except (json.JSONDecodeError, AttributeError):
-        return (None, None)
+        return (None, None, None)
     if provider == "anthropic":
-        return (usage.get("input_tokens"), usage.get("output_tokens"))
-    return (usage.get("prompt_tokens"), usage.get("completion_tokens"))
+        return (usage.get("input_tokens"), usage.get("output_tokens"),
+                usage.get("cache_read_input_tokens"))
+    cached = (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+    return (usage.get("prompt_tokens"), usage.get("completion_tokens"), cached)
 
 
 def _scrape_openai(chunk: bytes, state: dict) -> None:
@@ -123,6 +126,9 @@ def _scrape_openai(chunk: bytes, state: dict) -> None:
             if usage:
                 state["input"] = usage.get("prompt_tokens", state["input"])
                 state["output"] = usage.get("completion_tokens", state["output"])
+                cached = (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+                if cached is not None:
+                    state["cached"] = cached
         except (KeyError, IndexError, AttributeError):
             pass
 
@@ -134,6 +140,8 @@ def _scrape_anthropic(chunk: bytes, state: dict) -> None:
             usage = (obj.get("message") or {}).get("usage") or {}
             state["input"] = usage.get("input_tokens", state["input"])
             state["output"] = usage.get("output_tokens", state["output"])
+            if usage.get("cache_read_input_tokens") is not None:
+                state["cached"] = usage["cache_read_input_tokens"]
         elif t == "content_block_delta":
             text = (obj.get("delta") or {}).get("text")
             if text:
@@ -183,7 +191,7 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
         upstream = await app.state.client.send(req, stream=True)
         status = upstream.status_code
         scrape = _scrape_anthropic if provider == "anthropic" else _scrape_openai
-        state = {"text": [], "input": None, "output": None}
+        state = {"text": [], "input": None, "output": None, "cached": None}
 
         async def gen():
             async for chunk in upstream.aiter_raw():
@@ -193,7 +201,8 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
             # tokenization runs in a threadpool after the stream, off the loop
             await run_in_threadpool(
                 _record_blocking, app, provider, model, payload,
-                state["input"], state["output"], "".join(state["text"]), status, started, True,
+                state["input"], state["output"], state["cached"], "".join(state["text"]),
+                status, started, True,
             )
 
         return StreamingResponse(
@@ -204,12 +213,12 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
 
     upstream = await app.state.client.post(url, content=body, headers=headers)
     data = upstream.content
-    usage_in, usage_out = _usage_from_body(data, provider)
+    usage_in, usage_out, cached = _usage_from_body(data, provider)
     # forward immediately; attribute + record in the background so the proxy adds
     # essentially no latency to the proxied call.
     record = BackgroundTask(
         _record_blocking, app, provider, model, payload,
-        usage_in, usage_out, None, upstream.status_code, started, False,
+        usage_in, usage_out, cached, None, upstream.status_code, started, False,
     )
     return Response(
         content=data,
@@ -219,8 +228,8 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
     )
 
 
-def _record_blocking(app, provider, model, payload, usage_in, usage_out, completion_text,
-                     status, started, streamed):
+def _record_blocking(app, provider, model, payload, usage_in, usage_out, cached,
+                     completion_text, status, started, streamed):
     """All the CPU work (tokenization + attribution) and the DB write. Runs in a
     threadpool / background task so it never blocks the proxied request."""
     breakdown = _attribute(payload, provider)
@@ -245,6 +254,7 @@ def _record_blocking(app, provider, model, payload, usage_in, usage_out, complet
             "streamed": streamed,
             "components": breakdown["components"],
             "detail": breakdown["tree"],
+            "cached_tokens": cached,
         }
     )
 

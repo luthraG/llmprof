@@ -162,6 +162,39 @@ def test_openai_streaming_counts_completion(tmp_path):
     assert row["completion_tokens"] > 0  # counted from streamed deltas
 
 
+def test_openai_captures_cached_tokens(tmp_path):
+    canned = {
+        "choices": [{"message": {"content": "ok"}}],
+        "usage": {
+            "prompt_tokens": 1200, "completion_tokens": 5, "total_tokens": 1205,
+            "prompt_tokens_details": {"cached_tokens": 1024},
+        },
+    }
+    app = create_app(db_path=str(tmp_path / "c.db"), upstream="http://mock")
+    app.state.client = httpx.AsyncClient(transport=_mock("/v1/chat/completions", json=canned))
+    client = TestClient(app)
+    client.post(
+        "/v1/chat/completions",
+        json={"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert app.state.store.recent(1)[0]["cached_tokens"] == 1024
+
+
+def test_anthropic_captures_cache_read(tmp_path):
+    canned = {
+        "content": [{"type": "text", "text": "ok"}],
+        "usage": {"input_tokens": 1500, "output_tokens": 6, "cache_read_input_tokens": 1300},
+    }
+    app = create_app(db_path=str(tmp_path / "c.db"), upstream="http://mock")
+    app.state.client = httpx.AsyncClient(transport=_mock("/v1/messages", json=canned))
+    client = TestClient(app)
+    client.post(
+        "/v1/messages",
+        json={"model": "claude-3-5-sonnet", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert app.state.store.recent(1)[0]["cached_tokens"] == 1300
+
+
 def test_health():
     app = create_app(db_path=":memory:", upstream="http://example")
     client = TestClient(app)
