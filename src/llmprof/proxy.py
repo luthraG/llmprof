@@ -76,6 +76,7 @@ def create_app(db_path: str | None = None, upstream: str | None = None) -> FastA
         return {
             "days": app.state.store.daily_summary(),
             "models": app.state.store.model_summary(),
+            "routes": app.state.store.routes(),
         }
 
     @app.get("/llmprof/api/sessions")
@@ -298,6 +299,7 @@ def _record_blocking(app, provider, model, payload, usage_in, usage_out, cached,
     threadpool / background task so it never blocks the proxied request."""
     breakdown = _attribute(payload, provider)
     msg_fp = tokens.message_fingerprint(payload, provider)
+    route = tokens.route_label(payload, provider)
     prompt_tokens = usage_in if usage_in is not None else breakdown["total"]
     completion_tokens = (
         usage_out
@@ -323,6 +325,7 @@ def _record_blocking(app, provider, model, payload, usage_in, usage_out, cached,
             "called_tools": called_tools,
             "msg_fp": msg_fp,
             "session_hint": session_hint,
+            "route": route,
         }
     )
 

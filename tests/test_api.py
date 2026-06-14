@@ -108,11 +108,29 @@ def test_api_traces_list_and_detail(tmp_path):
 def test_api_summary(tmp_path):
     client = _app_with_one_trace(tmp_path)
     s = client.get("/llmprof/api/summary").json()
-    assert "days" in s and "models" in s
+    assert "days" in s and "models" in s and "routes" in s
     assert len(s["days"]) >= 1
     day = s["days"][-1]
     assert day["calls"] == 1 and day["tokens"] > 0
     assert any(m["model"] == "gpt-4o" for m in s["models"])
+    assert s["routes"] and "+1 tools" in s["routes"][0]["route"]
+
+
+def test_api_routes_leaderboard(tmp_path):
+    """Calls sharing a system prompt + tool set group into one route; the
+    leaderboard totals cost per template and ranks most expensive first."""
+    client = _client(tmp_path, "r.db")
+    template = {"model": "gpt-4o", "messages": [
+        {"role": "system", "content": "You are a pricing bot"},
+        {"role": "user", "content": "quote"}]}
+    client.post("/v1/chat/completions", json=template)
+    client.post("/v1/chat/completions", json=template)
+    client.post("/v1/chat/completions", json={
+        "model": "gpt-4o", "messages": [{"role": "user", "content": "no system here"}]})
+    routes = client.get("/llmprof/api/summary").json()["routes"]
+    assert len(routes) == 2
+    pricing_route = next(r for r in routes if "pricing bot" in r["route"])
+    assert pricing_route["calls"] == 2
 
 
 def test_api_trace_404(tmp_path):

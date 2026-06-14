@@ -135,6 +135,28 @@ def test_message_fingerprint_prefix_chain():
     assert other != fp1[: len(other)]
 
 
+def test_route_label_groups_by_template():
+    base = {
+        "messages": [
+            {"role": "system", "content": "You are an SRE assistant for incidents"},
+            {"role": "user", "content": "what broke"},
+        ],
+        "tools": [{"type": "function", "function": {"name": "a"}},
+                  {"type": "function", "function": {"name": "b"}}],
+    }
+    label = tokens.route_label(base, "openai")
+    assert "SRE assistant" in label and "+2 tools" in label
+    # same template, different user message -> same route key
+    other = {"messages": [base["messages"][0], {"role": "user", "content": "different q"}],
+             "tools": base["tools"]}
+    assert tokens.route_label(other, "openai") == label
+    # no system prompt
+    assert tokens.route_label({"messages": [{"role": "user", "content": "hi"}]},
+                              "openai").startswith("(no system prompt)")
+    # anthropic reads system from its own field
+    assert "Be concise" in tokens.route_label({"system": "Be concise", "messages": []}, "anthropic")
+
+
 def test_pricing_known_and_unknown():
     c = pricing.cost("gpt-4o", 1000, 1000)
     assert c == round(0.0025 + 0.01, 6)

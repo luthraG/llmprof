@@ -57,7 +57,7 @@ async function renderTrends(force) {
   let s;
   try { s = await (await fetch("/llmprof/api/summary")).json(); }
   catch (e) { return; }
-  const days = s.days || [], models = s.models || [];
+  const days = s.days || [], models = s.models || [], routes = s.routes || [];
   if (!days.length) {
     main.innerHTML = `<div class="empty"><h2>No data yet</h2><div>Capture a few calls to see daily trends.</div></div>`;
     return;
@@ -84,6 +84,18 @@ async function renderTrends(force) {
     `<span class="ltok num">${fmt(m.tokens)} tok</span>`+
     `<span class="lpct">${m.calls}&times;</span>`+
     `<span class="lcost">${money(m.cost)}</span></div>`).join("");
+  const maxRoute = Math.max(...routes.map(r => r.cost), 1e-9);
+  const routeRows = routes.map(r => {
+    const w = Math.max(2, Math.round(r.cost / maxRoute * 100));
+    return `<div class="route"><div class="rtop"><span class="rname">${esc(r.route || 'unknown')}</span>`+
+      `<span class="rcost">${money(r.cost)}</span></div>`+
+      `<div class="rbar"><i style="width:${w}%"></i></div>`+
+      `<div class="rmeta">${r.calls}&times; &middot; ${fmt(Math.round(r.avg_tokens))} tok/call avg &middot; ${esc(r.model || '')}</div></div>`;
+  }).join("");
+  const routePanel = routes.length
+    ? `<div class="panel"><div class="panel-title"><span>most expensive prompts</span><span class="pill">${routes.length}</span></div>`+
+      `<div class="routes">${routeRows}</div></div>`
+    : "";
   main.innerHTML =
     `<div class="detail-head"><div class="dh-title"><h1>Trends</h1>`+
     `<div class="meta">daily usage across all captured calls</div></div></div>`+
@@ -93,7 +105,8 @@ async function renderTrends(force) {
     `<div class="tcard"><div class="tlabel">today's tokens</div><div class="tval">${fmt(today.tokens)}</div>${delta(today.tokens, yest.tokens)}</div>`+
     `</div>`+
     `<div class="panel"><div class="panel-title">cost per day (last ${show.length})</div><div class="barchart">${bars}</div></div>`+
-    `<div class="panel"><div class="panel-title"><span>by model</span><span class="pill">${models.length}</span></div><div class="legend" style="grid-template-columns:1fr">${modelRows}</div></div>`;
+    `<div class="panel"><div class="panel-title"><span>by model</span><span class="pill">${models.length}</span></div><div class="legend" style="grid-template-columns:1fr">${modelRows}</div></div>`+
+    routePanel;
 }
 
 function setView(v) {

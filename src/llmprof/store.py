@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS traces (
     called_tools TEXT,
     session_id TEXT,
     turn INTEGER,
-    msg_fp TEXT
+    msg_fp TEXT,
+    route TEXT
 );
 """
 
@@ -74,6 +75,8 @@ class Store:
                 conn.execute("ALTER TABLE traces ADD COLUMN turn INTEGER")
             if "msg_fp" not in cols:
                 conn.execute("ALTER TABLE traces ADD COLUMN msg_fp TEXT")
+            if "route" not in cols:
+                conn.execute("ALTER TABLE traces ADD COLUMN route TEXT")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_traces_session ON traces (session_id)"
             )
@@ -114,8 +117,8 @@ class Store:
                 """INSERT INTO traces
                    (ts, provider, model, endpoint, status, prompt_tokens,
                     completion_tokens, total_tokens, cost_usd, streamed, components, detail,
-                    cached_tokens, called_tools, session_id, turn, msg_fp)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    cached_tokens, called_tools, session_id, turn, msg_fp, route)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     trace.get("ts", time.time()),
                     trace.get("provider"),
@@ -134,6 +137,7 @@ class Store:
                     session_id,
                     turn,
                     json.dumps(fp) if fp else None,
+                    trace.get("route"),
                 ),
             )
 
@@ -202,6 +206,22 @@ class Store:
             d["components"] = json.loads(d.get("components") or "{}")
             out.append(d)
         return out
+
+    def routes(self, limit: int = 15) -> list[dict]:
+        """Most expensive prompt templates (system prompt + tool set), so you can
+        see which recurring call shape drives the bill. Most expensive first."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT route, COUNT(*) AS calls,
+                          COALESCE(SUM(cost_usd), 0) AS cost,
+                          COALESCE(SUM(total_tokens), 0) AS tokens,
+                          COALESCE(AVG(total_tokens), 0) AS avg_tokens,
+                          MAX(model) AS model
+                   FROM traces WHERE route IS NOT NULL
+                   GROUP BY route ORDER BY cost DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def model_summary(self) -> list[dict]:
         """Per-model totals, most expensive first."""

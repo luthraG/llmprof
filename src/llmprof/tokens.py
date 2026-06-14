@@ -232,5 +232,27 @@ def message_fingerprint(payload: dict | None, provider: str) -> list[str]:
     return fps
 
 
+def route_label(payload: dict | None, provider: str) -> str:
+    """A short, human-readable signature of a call's reusable template: the start
+    of the system prompt plus how many tools it ships. Calls that share this are
+    the same 'route', so the leaderboard can total cost per prompt template."""
+    payload = payload or {}
+    if provider == "anthropic":
+        system = payload.get("system")
+        sys_text = system if isinstance(system, str) else " ".join(
+            b.get("text", "") for b in (system or []) if isinstance(b, dict)
+        )
+        tools = payload.get("tools") or []
+    else:
+        sys_text = ""
+        for message in payload.get("messages") or []:
+            if message.get("role") == "system":
+                sys_text = _openai_message_text(message)
+                break
+        tools = payload.get("tools") or payload.get("functions") or []
+    snippet = " ".join(sys_text.split())[:60] or "(no system prompt)"
+    return snippet + (f"  +{len(tools)} tools" if tools else "")
+
+
 # Back-compat alias (OpenAI was the first provider supported).
 attribute = attribute_openai
