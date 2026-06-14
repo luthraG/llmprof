@@ -40,7 +40,17 @@ async function load() {
   else if (!TRACES.length) renderEmpty();
 }
 
-async function renderTrends() {
+let _trendsSig = null;
+function trendsSig() {
+  // cheap fingerprint of the data: count + newest call. Changes only when a
+  // new call lands, so the 4s poll does not rebuild (and flash) the panel.
+  const head = TRACES[0];
+  return TRACES.length + ":" + (head ? head.id + ":" + (head.ts || 0) : "0");
+}
+
+async function renderTrends(force) {
+  if (!force && _trendsSig === trendsSig() && $("#main .trends-cards")) return;
+  _trendsSig = trendsSig();
   const main = $("#main");
   let s;
   try { s = await (await fetch("/llmprof/api/summary")).json(); }
@@ -87,7 +97,7 @@ async function renderTrends() {
 function setView(v) {
   view = v;
   document.querySelectorAll("#viewToggle button").forEach(b => b.classList.toggle("seg-on", b.dataset.view === v));
-  if (v === "trends") renderTrends();
+  if (v === "trends") renderTrends(true);
   else if (selectedId != null) select(selectedId);
   else if (TRACES.length) select(TRACES[0].id);
   else renderEmpty();

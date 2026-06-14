@@ -62,6 +62,8 @@ def test_static_assets_served(tmp_path):
     # the flame graph and breakdown degrade to a note instead of a blank panel
     assert "empty-note" in js.text
     assert ".empty-note" in css.text
+    # the trends view is throttled so the 4s poll does not flash the panel
+    assert "trendsSig" in js.text
 
 
 def test_empty_breakdown_served(tmp_path):
