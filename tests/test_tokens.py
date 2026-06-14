@@ -163,3 +163,24 @@ def test_pricing_known_and_unknown():
     assert pricing.cost("gpt-4o-mini", 1000, 0) == 0.00015  # longest-match wins
     assert pricing.cost("claude-3-5-sonnet", 1000, 1000) == round(0.003 + 0.015, 6)
     assert pricing.cost("some-unknown-model", 1000, 1000) is None
+
+
+def test_pricing_expanded_models_and_longest_match():
+    # newer Claude dotted subversions fall back to the family tier price
+    assert pricing.rates("claude-sonnet-4-6-20251015") == (0.003, 0.015)
+    assert pricing.rates("claude-opus-4-1") == (0.015, 0.075)
+    # provider-prefixed open-weight ids match by substring, case-insensitively
+    assert pricing.rates("meta-llama/Llama-3.1-405B-Instruct") == (0.0009, 0.0009)
+    assert pricing.rates("Qwen/Qwen2.5-72B-Instruct") == (0.00036, 0.0004)
+    assert pricing.rates("cerebras/qwen-3-32b") == (0.0004, 0.0008)
+    # longest-match disambiguation
+    assert pricing.rates("gemini-2.5-flash-lite-preview") == (0.0001, 0.0004)
+    assert pricing.rates("gemini-2.5-flash") == (0.0003, 0.0025)
+    assert pricing.rates("deepseek-r1-distill-llama-70b") == (0.00023, 0.00069)
+    assert pricing.rates("deepseek-r1") == (0.0005, 0.00215)
+    assert pricing.rates("mixtral-8x22b-instruct") == (0.0006, 0.0006)
+    assert pricing.rates("grok-3-mini") == (0.0003, 0.0005)
+    # context windows came along for the new families
+    assert pricing.context_window("gemini-2.5-pro") == 1048576
+    assert pricing.context_window("deepseek-chat") == 128000
+    assert pricing.context_window("llama-3.3-70b-instruct") == 128000
