@@ -31,6 +31,11 @@ jobs:
 
   deploy:
     needs: build
+    # Only deploy when explicitly enabled, so push events just verify the build
+    # (green) instead of failing on Pages not being set up yet. To publish: enable
+    # Pages with Source = GitHub Actions, then set repo variable DOCS_DEPLOY=true
+    # (or run this workflow manually).
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.DOCS_DEPLOY == 'true' }}
     runs-on: ubuntu-latest
     environment:
       name: github-pages
