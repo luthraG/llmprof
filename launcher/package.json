@@ -1,0 +1,36 @@
+{
+  "name": "llmprof",
+  "version": "0.0.1",
+  "description": "pprof for your LLM context. Run the llmprof profiler with no Python install: npx llmprof up.",
+  "bin": {
+    "llmprof": "bin/cli.cjs"
+  },
+  "type": "commonjs",
+  "files": [
+    "bin/cli.cjs",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [
+    "llm",
+    "tokens",
+    "profiler",
+    "openai",
+    "anthropic",
+    "cost",
+    "flame-graph"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/luthraG/llmprof.git",
+    "directory": "launcher"
+  },
+  "homepage": "https://luthrag.github.io/llmprof",
+  "license": "MIT",
+  "author": "Gaurav Luthra"
+}

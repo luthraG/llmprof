@@ -22,3 +22,14 @@ jobs:
         run: ruff check .
       - name: Test
         run: pytest -q
+
+  launcher:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test the npx launcher
+        run: node --test
+        working-directory: launcher
