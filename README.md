@@ -1,89 +1,126 @@
-# llmprof
+<h1 align="center">llmprof</h1>
 
-**pprof for your LLM context. See where every token and dollar goes.**
+<p align="center"><b>pprof for your LLM context.</b> See where every token and dollar goes.</p>
 
-> v0.0.1. Working today: the proxy, per-component token attribution, cost
-> tracking (100+ models), OpenAI + Anthropic support, the dashboard (flame
-> graph, trends, context timeline, cost leaderboard), the waste detector, and
-> the Python SDK. Next: a JS/TS SDK and an `npx` launcher.
+<p align="center">
+  <a href="https://github.com/luthraG/llmprof/actions/workflows/ci.yml"><img src="https://github.com/luthraG/llmprof/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/python-3.9%2B-blue" alt="Python 3.9+">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
+  <a href="https://luthrag.github.io/llmprof"><img src="https://img.shields.io/badge/docs-llmprof.dev-7c84ff" alt="Docs"></a>
+</p>
 
-Your billing dashboard and `/usage` are *meters*: they tell you *how much* you
-spent. `llmprof` is a *profiler*: it tells you **where** the tokens in each
-request actually went, broken down into system prompt vs. tool/function schemas
-vs. retrieved context vs. conversation history. You profile CPU and memory, so
-why fly blind on the most expensive resource in your AI app, the context window?
+<p align="center">
+  <img src="assets/demo.gif" alt="llmprof: point your base_url at the proxy and see a flame graph of where every token went, plus the dollars you can reclaim" width="900">
+</p>
 
-## Why
-
-A single agent call can spend thousands of tokens on tool schemas and stale
-history before the user says anything, and nothing shows you the breakdown.
-`llmprof` sits in front of your LLM provider, attributes every request's tokens
-by component, prices the call, and flame-graphs it so the waste is obvious, with
-a waste detector that flags what to cut.
-
-## Quickstart (30 seconds)
+You profile CPU and memory. Why fly blind on the most expensive resource in your
+AI app, the context window? Your billing page is a *meter* - it says how much you
+spent. `llmprof` is a *profiler* - it says **where** each request's tokens went
+(system prompt vs. tool schemas vs. RAG vs. history), prices the call,
+flame-graphs it, and tells you what to cut.
 
 ```bash
-pipx install llmprof      # or: pip install llmprof
-llmprof up                # starts the profiling proxy on http://127.0.0.1:4000
+pipx install llmprof && llmprof up      # or, no Python:  npx llmprof up
 ```
 
-Point your client's base URL at the proxy. Your API key passes straight through
-to the real provider:
+Point your client's base URL at `http://localhost:4000/v1` (your API key passes
+straight through) and open `http://localhost:4000`. Everything runs locally; your
+prompts and keys never leave the machine.
+
+## What you see
+
+A flame graph of one request's tokens, with the optimization findings and the
+dollars you can reclaim on the call:
+
+![Context flame graph with per-tool drill-down, optimization findings, and a reclaimable-cost strip](assets/flame-graph.png)
+
+The headline number across all your calls, projected to a month, plus day-over-day
+trends and a most-expensive-prompts leaderboard:
+
+![Trends view with a reclaimable-per-month banner, today vs yesterday cards, a cost-per-day chart, and a by-model breakdown](assets/trends.png)
+
+Context creep across an agent's turns - history balloons while the system prompt
+and tools stay flat:
+
+![Context timeline showing prompt tokens per turn growing across a run](assets/timeline.png)
+
+## Quickstart
 
 ```python
 from openai import OpenAI
-client = OpenAI(base_url="http://127.0.0.1:4000/v1")  # the only change
-client.chat.completions.create(model="gpt-4o", messages=[...])
+client = OpenAI(base_url="http://localhost:4000/v1")  # the only change
+client.chat.completions.create(model="gpt-4o", messages=[...], tools=[...])
 ```
 
-Then see where the tokens went:
+For Anthropic, point the proxy upstream and set the base URL:
 
 ```bash
-llmprof traces
+llmprof up --upstream https://api.anthropic.com
+```
+```python
+from anthropic import Anthropic
+client = Anthropic(base_url="http://localhost:4000")
 ```
 
-```
-                          last 1 calls
- model    prompt  completion  total   cost     top component
- gpt-4o      842           2    844   $0.0021  tool schemas (537)
-```
+Then open the dashboard, or `llmprof traces` for a terminal summary. Full docs:
+**<https://luthrag.github.io/llmprof>**.
 
-Or open the dashboard at <http://127.0.0.1:4000> for the context flame graph,
-day-over-day trends, the per-turn context timeline, the cost leaderboard, and the
-reclaimable-cost view.
+## Features
 
-Everything runs locally. Your prompts and keys never leave your machine.
-
-Full documentation: <https://luthrag.github.io/llmprof>
+- **Context flame graph** - per-request token breakdown with per-tool drill-down.
+- **Waste detector** - duplicated content, unused tool schemas, and uncached
+  prefixes, rolled into a "$X/mo reclaimable" headline.
+- **Context timeline** - how context grows turn over turn across an agent run.
+- **Cost leaderboard** - which prompt template (system prompt + tools) drives the
+  bill, not just which model.
+- **Cost for 100+ models**, overridable via `LLMPROF_PRICING`.
+- **Runs local**, single SQLite file, with a pluggable backend for a shared
+  database.
 
 ## Works with
 
-`llmprof` profiles by intercepting the API, so it is language-agnostic and
-provider-agnostic:
+- **Any OpenAI-compatible API** via `/v1/chat/completions` (OpenAI, Azure, Groq,
+  Together, OpenRouter, DeepSeek, Fireworks, Gemini's OpenAI endpoint, local
+  Ollama / vLLM). Point the proxy at it with `--upstream`.
+- **Anthropic** via `/v1/messages`.
+- **[Claude Code](https://luthrag.github.io/llmprof/integrations/claude-code/)**
+  and the **[Codex CLI](https://luthrag.github.io/llmprof/integrations/codex/)** -
+  set their base URL to the proxy.
+- **Any language** - the proxy is a local HTTP service; only the base URL changes.
 
-- **Any language.** The proxy is a local HTTP service. Your app can be Python,
-  Node/TypeScript, Go, Ruby, anything. You only change its base URL. (A Python
-  package is how you install the proxy today; an `npx` launcher and a JS SDK are
-  on the roadmap.)
-- **OpenAI and any OpenAI-compatible API** through `/v1/chat/completions`:
-  Azure OpenAI, Groq, Together, OpenRouter, Mistral, DeepSeek, Fireworks, local
-  Ollama / vLLM, and Gemini's OpenAI-compatible endpoint. Point the proxy at it:
+## SDKs
 
-  ```bash
-  llmprof up --upstream https://api.groq.com/openai
-  ```
+When the proxy's heuristics are not enough, label components yourself for precise
+attribution:
 
-- **Anthropic** through `/v1/messages` (exact token usage is read from the
-  stream):
+```python
+# Python
+import llmprof
+with llmprof.profile(model="gpt-4o") as p:
+    p.add("system prompt", system_text)
+    p.add("rag_chunk", doc, name="kb#42")
+    p.add("tool", search_schema, name="search", called=True)
+    p.usage(resp.usage)
+```
 
-  ```bash
-  llmprof up --upstream https://api.anthropic.com
-  ```
-  ```python
-  from anthropic import Anthropic
-  client = Anthropic(base_url="http://127.0.0.1:4000")
-  ```
+```js
+// JavaScript / TypeScript  (npm i @llmprof/sdk)
+import { profile } from "@llmprof/sdk";
+await profile({ model: "gpt-4o" }, async (p) => {
+  p.add("system prompt", systemText);
+  p.add("rag_chunk", doc, { name: "kb#42" });
+  p.add("tool", searchSchema, { name: "search", called: true });
+  p.usage(resp.usage);
+});
+```
+
+## How it works
+
+The proxy forwards your request unchanged and streams the response straight back;
+the analysis (tokenizing, attribution, pricing, waste detection) happens off the
+hot path, so it adds essentially no latency. See the
+[architecture](https://luthrag.github.io/llmprof/concepts/architecture/) docs for
+the full picture.
 
 ## Configuration
 
@@ -95,25 +132,6 @@ provider-agnostic:
 | Price overrides | | `LLMPROF_PRICING` | built-in table |
 | Data dir | | `LLMPROF_HOME` | `~/.llmprof` |
 | Storage backend | | `LLMPROF_DB_URL` | SQLite (local file) |
-
-Port already taken? `llmprof up --port 4100`.
-
-Custom or missing model prices? Point `LLMPROF_PRICING` at a JSON file of
-`{"model-id": [input_per_1k, output_per_1k]}`. Models without a price still get
-their tokens recorded; only the dollar figure is omitted.
-
-## Status / roadmap
-
-- [x] OpenAI-compatible profiling proxy (streaming supported)
-- [x] Anthropic Messages API (`/v1/messages`) attribution, with exact usage from the stream
-- [x] Per-component token attribution (system / tools / history / input / tool calls / tool results)
-- [x] Cost estimation with a user-overridable pricing table (100+ models)
-- [x] Local SQLite trace store + `llmprof traces`, with a pluggable storage backend
-- [x] Dashboard: context flame graph, day-over-day trends, context-growth timeline, cost leaderboard
-- [x] Waste detector with a "$X/mo reclaimable" headline
-- [x] Python SDK for precise RAG / tool / step labels
-- [ ] JavaScript / TypeScript SDK
-- [ ] `npx llmprof` launcher for non-Python users
 
 ## What llmprof is not
 
@@ -128,6 +146,9 @@ python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
 ruff check . && pytest
 ```
+
+The dashboard is dependency-light vanilla JS/SVG; docs live in `docs/` (Astro
+Starlight). See [Contributing](https://luthrag.github.io/llmprof/project/contributing/).
 
 ## License
 
