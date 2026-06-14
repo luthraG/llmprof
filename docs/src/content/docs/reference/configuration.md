@@ -43,6 +43,8 @@ With the proxy running on port 4000:
 
 - `POST /v1/chat/completions` - OpenAI-format calls (captured).
 - `POST /v1/messages` - Anthropic-format calls (captured).
+- `POST /llmprof/api/ingest` - record a trace from labeled components; used by
+  the [JS/TS SDK](../../sdk/javascript/) and any non-Python client.
 - any other path - proxied verbatim to the upstream.
 - `GET /` - the dashboard.
 - `GET /llmprof/health` - health check.

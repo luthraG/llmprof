@@ -93,6 +93,5 @@ By default the SDK writes to the same store as the proxy
 one dashboard.
 
 :::note[JavaScript / TypeScript]
-A JS/TS SDK with the same component-labeling API is on the
-[roadmap](../../project/roadmap/).
+There is a [JS/TS SDK](../javascript/) with the same component-labeling API.
 :::

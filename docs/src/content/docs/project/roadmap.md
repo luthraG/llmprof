@@ -16,11 +16,11 @@ description: What llmprof does today and what is coming next.
   database).
 - **`npx llmprof` launcher** - run the proxy with no Python install. See
   [Installation](../../start/installation/#npx-no-python-needed).
+- **JavaScript / TypeScript SDK** - the same component-labeling API as Python.
+  See the [JS/TS SDK](../../sdk/javascript/).
 
 ## Next
 
-- **JavaScript / TypeScript SDK** - the same component-labeling API as Python
-  (`rag`, `tool`, `step` labels).
 - **README + demo GIF** - a 15-second above-the-fold demo of the flow.
 - **Postgres backend** - a shared/team dashboard on the existing store
   abstraction.

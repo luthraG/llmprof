@@ -53,7 +53,10 @@ export default defineConfig({
 				},
 				{
 					label: 'SDK',
-					items: [{ label: 'Python SDK', slug: 'sdk/python' }],
+					items: [
+						{ label: 'Python SDK', slug: 'sdk/python' },
+						{ label: 'JavaScript / TypeScript SDK', slug: 'sdk/javascript' },
+					],
 				},
 				{
 					label: 'Reference',
