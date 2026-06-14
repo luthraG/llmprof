@@ -42,12 +42,16 @@ class Store:
         self._init()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path, check_same_thread=False)
+        conn = sqlite3.connect(self.path, check_same_thread=False, timeout=5.0)
         conn.row_factory = sqlite3.Row
+        # tolerate concurrent writers (traces are recorded from a threadpool)
+        conn.execute("PRAGMA busy_timeout=5000")
         return conn
 
     def _init(self) -> None:
         with self._connect() as conn:
+            if self.path != ":memory:":
+                conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(_SCHEMA)
 
     def record(self, trace: dict) -> None:
