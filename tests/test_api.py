@@ -47,6 +47,18 @@ def test_dashboard_served(tmp_path):
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
     assert "llmpro" in r.text
+    assert "/llmprof/app.css" in r.text and "/llmprof/app.js" in r.text
+
+
+def test_static_assets_served(tmp_path):
+    client = _app_with_one_trace(tmp_path)
+    css = client.get("/llmprof/app.css")
+    assert css.status_code == 200
+    assert "text/css" in css.headers["content-type"]
+    assert ".dd-menu" in css.text  # the new dropdown styles are present
+    js = client.get("/llmprof/app.js")
+    assert js.status_code == 200
+    assert "javascript" in js.headers["content-type"]
 
 
 def test_api_traces_list_and_detail(tmp_path):

@@ -29,7 +29,10 @@ from .store import Store
 
 DEFAULT_UPSTREAM = os.environ.get("LLMPROF_UPSTREAM", "https://api.openai.com")
 _SKIP_HEADERS = {"host", "content-length", "connection", "accept-encoding"}
-_UI_HTML = (Path(__file__).parent / "ui" / "index.html").read_text(encoding="utf-8")
+_UI_DIR = Path(__file__).parent / "ui"
+_UI_HTML = (_UI_DIR / "index.html").read_text(encoding="utf-8")
+_UI_CSS = (_UI_DIR / "app.css").read_text(encoding="utf-8")
+_UI_JS = (_UI_DIR / "app.js").read_text(encoding="utf-8")
 
 
 def _forward_headers(request: Request) -> dict[str, str]:
@@ -55,6 +58,14 @@ def create_app(db_path: str | None = None, upstream: str | None = None) -> FastA
     @app.get("/llmprof", response_class=HTMLResponse)
     async def dashboard() -> str:
         return _UI_HTML
+
+    @app.get("/llmprof/app.css")
+    async def app_css() -> Response:
+        return Response(_UI_CSS, media_type="text/css")
+
+    @app.get("/llmprof/app.js")
+    async def app_js() -> Response:
+        return Response(_UI_JS, media_type="application/javascript")
 
     @app.get("/llmprof/api/traces")
     async def api_traces(limit: int = 100) -> dict:

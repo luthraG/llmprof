@@ -39,7 +39,7 @@ llmprof = "llmprof.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/llmprof"]
-artifacts = ["src/llmprof/ui/*.html"]
+artifacts = ["src/llmprof/ui/index.html", "src/llmprof/ui/app.css", "src/llmprof/ui/app.js"]
 
 [tool.ruff]
 line-length = 100
