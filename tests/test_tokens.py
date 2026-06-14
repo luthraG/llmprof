@@ -184,3 +184,21 @@ def test_pricing_expanded_models_and_longest_match():
     assert pricing.context_window("gemini-2.5-pro") == 1048576
     assert pricing.context_window("deepseek-chat") == 128000
     assert pricing.context_window("llama-3.3-70b-instruct") == 128000
+
+
+def test_pricing_latest_models():
+    # newest 2026 flagships across the providers in use
+    assert pricing.rates("gpt-5.5") == (0.005, 0.03)
+    assert pricing.rates("gpt-5.4-mini") == (0.00075, 0.0045)  # longer key beats gpt-5.4
+    assert pricing.rates("claude-fable-5") == (0.01, 0.05)
+    # the cheaper Opus 4.5+ tier must win over the old claude-opus-4 (15/75) family key
+    assert pricing.rates("claude-opus-4-8-20251101") == (0.005, 0.025)
+    assert pricing.rates("claude-opus-4-1") == (0.015, 0.075)  # 4.0/4.1 still the old tier
+    assert pricing.rates("gemini-3.5-flash") == (0.0015, 0.009)
+    assert pricing.rates("gemini-3.1-pro-preview") == (0.002, 0.012)
+    # DeepSeek chat/reasoner are now V4-flash aliases at the lower price
+    assert pricing.rates("deepseek-chat") == (0.00014, 0.00028)
+    assert pricing.rates("deepseek-v4-pro") == (0.000435, 0.00087)
+    assert pricing.rates("qwen3-max") == (0.0012, 0.006)
+    assert pricing.context_window("gpt-5.5") == 1050000
+    assert pricing.context_window("claude-opus-4-8") == 1000000

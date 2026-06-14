@@ -22,6 +22,13 @@ import os
 # values below are representative, so use LLMPROF_PRICING to pin exact numbers.
 PRICES: dict[str, tuple[float, float]] = {
     # --- OpenAI ---
+    "gpt-5.5-pro": (0.03, 0.18),
+    "gpt-5.5": (0.005, 0.03),
+    "gpt-5.4-pro": (0.03, 0.18),
+    "gpt-5.4-nano": (0.0002, 0.00125),
+    "gpt-5.4-mini": (0.00075, 0.0045),
+    "gpt-5.4": (0.0025, 0.015),
+    "gpt-5.3-codex": (0.00175, 0.014),
     "gpt-4.1-nano": (0.0001, 0.0004),
     "gpt-4.1-mini": (0.0004, 0.0016),
     "gpt-4.1": (0.002, 0.008),
@@ -40,6 +47,12 @@ PRICES: dict[str, tuple[float, float]] = {
     "gpt-oss-120b": (0.00015, 0.0006),
     "gpt-oss-20b": (0.00005, 0.0002),
     # --- Anthropic (family keys also match newer dotted subversions) ---
+    "claude-fable-5": (0.01, 0.05),
+    "claude-opus-4-8": (0.005, 0.025),
+    "claude-opus-4-7": (0.005, 0.025),
+    "claude-opus-4-6": (0.005, 0.025),
+    "claude-opus-4-5": (0.005, 0.025),
+    "claude-sonnet-4-6": (0.003, 0.015),
     "claude-3-5-haiku": (0.0008, 0.004),
     "claude-3-5-sonnet": (0.003, 0.015),
     "claude-3-7-sonnet": (0.003, 0.015),
@@ -50,6 +63,10 @@ PRICES: dict[str, tuple[float, float]] = {
     "claude-sonnet-4": (0.003, 0.015),
     "claude-opus-4": (0.015, 0.075),
     # --- Google Gemini ---
+    "gemini-3.5-flash": (0.0015, 0.009),
+    "gemini-3.1-pro": (0.002, 0.012),
+    "gemini-3.1-flash-lite": (0.00025, 0.0015),
+    "gemini-3-flash": (0.0005, 0.003),
     "gemini-2.5-pro": (0.00125, 0.01),
     "gemini-2.5-flash-lite": (0.0001, 0.0004),
     "gemini-2.5-flash": (0.0003, 0.0025),
@@ -58,9 +75,12 @@ PRICES: dict[str, tuple[float, float]] = {
     "gemini-1.5-pro": (0.00125, 0.005),
     "gemini-1.5-flash-8b": (0.0000375, 0.00015),
     "gemini-1.5-flash": (0.000075, 0.0003),
-    # --- DeepSeek (first-party API) ---
-    "deepseek-chat": (0.00027, 0.0011),
-    "deepseek-reasoner": (0.00055, 0.00219),
+    # --- DeepSeek (first-party API; chat/reasoner are now V4-flash aliases) ---
+    "deepseek-v4-pro": (0.000435, 0.00087),
+    "deepseek-v4-flash": (0.00014, 0.00028),
+    "deepseek-v3.2": (0.00026, 0.00038),
+    "deepseek-chat": (0.00014, 0.00028),
+    "deepseek-reasoner": (0.00014, 0.00028),
     # --- DeepSeek open weights (hosted; representative) ---
     "deepseek-r1-distill-llama-70b": (0.00023, 0.00069),
     "deepseek-r1": (0.0005, 0.00215),
@@ -77,6 +97,8 @@ PRICES: dict[str, tuple[float, float]] = {
     "llama-3-70b": (0.00023, 0.0004),
     "llama-3-8b": (0.00003, 0.00006),
     # --- Qwen (hosted; representative; both "qwen2.5"/"qwen-2.5" spellings) ---
+    "qwen3-max": (0.0012, 0.006),
+    "qwen-3-max": (0.0012, 0.006),
     "qwen2.5-coder": (0.00008, 0.00018),
     "qwen-2.5-coder": (0.00008, 0.00018),
     "qwen2.5-72b": (0.00036, 0.0004),
@@ -98,6 +120,7 @@ PRICES: dict[str, tuple[float, float]] = {
     "mixtral-8x22b": (0.0006, 0.0006),
     "mixtral-8x7b": (0.00024, 0.00024),
     # --- Google Gemma (hosted; representative) ---
+    "gemma-4-31b": (0.00013, 0.00038),
     "gemma-3-27b": (0.00008, 0.00016),
     "gemma-2-27b": (0.00027, 0.00027),
     "gemma-2-9b": (0.00003, 0.00006),
@@ -144,6 +167,8 @@ def _match(model: str | None) -> tuple[float, float] | None:
 # approximate context-window sizes (tokens), substring-matched like prices
 CONTEXT_WINDOWS: dict[str, int] = {
     # OpenAI
+    "gpt-5.5-pro": 1050000, "gpt-5.5": 1050000, "gpt-5.4-pro": 1050000,
+    "gpt-5.4-nano": 400000, "gpt-5.4-mini": 400000, "gpt-5.4": 1050000, "gpt-5.3-codex": 400000,
     "gpt-4.1": 1047576,
     "gpt-4o-mini": 128000, "chatgpt-4o-latest": 128000, "gpt-4o": 128000,
     "gpt-4-turbo": 128000, "gpt-4": 8192, "gpt-3.5-turbo": 16385,
@@ -151,14 +176,20 @@ CONTEXT_WINDOWS: dict[str, int] = {
     "o1-pro": 200000, "o1-mini": 128000, "o1": 200000,
     "gpt-oss-120b": 131072, "gpt-oss-20b": 131072,
     # Anthropic
+    "claude-fable-5": 1000000,
+    "claude-opus-4-8": 1000000, "claude-opus-4-7": 1000000, "claude-opus-4-6": 1000000,
+    "claude-opus-4-5": 200000, "claude-sonnet-4-6": 1000000,
     "claude-3-5-sonnet": 200000, "claude-3-7-sonnet": 200000, "claude-3-5-haiku": 200000,
     "claude-3-sonnet": 200000, "claude-3-opus": 200000, "claude-3-haiku": 200000,
     "claude-sonnet-4": 200000, "claude-opus-4": 200000, "claude-haiku-4": 200000,
     # Google
+    "gemini-3.5-flash": 1000000, "gemini-3.1-pro": 1000000,
+    "gemini-3.1-flash-lite": 1000000, "gemini-3-flash": 1000000,
     "gemini-2.5-pro": 1048576, "gemini-2.5-flash-lite": 1048576, "gemini-2.5-flash": 1048576,
     "gemini-2.0-flash-lite": 1048576, "gemini-2.0-flash": 1048576,
     "gemini-1.5-pro": 2000000, "gemini-1.5-flash-8b": 1000000, "gemini-1.5-flash": 1000000,
     # DeepSeek
+    "deepseek-v4-pro": 1000000, "deepseek-v4-flash": 1000000, "deepseek-v3.2": 160000,
     "deepseek-chat": 128000, "deepseek-reasoner": 128000,
     "deepseek-r1-distill-llama-70b": 131072, "deepseek-r1": 128000, "deepseek-v3": 128000,
     # Meta Llama
@@ -167,6 +198,7 @@ CONTEXT_WINDOWS: dict[str, int] = {
     "llama-3.1-405b": 128000, "llama-3.1-70b": 128000, "llama-3.1-8b": 128000,
     "llama-3-70b": 8192, "llama-3-8b": 8192,
     # Qwen
+    "qwen3-max": 250000, "qwen-3-max": 250000,
     "qwen2.5-coder": 32768, "qwen-2.5-coder": 32768,
     "qwen2.5-72b": 131072, "qwen-2.5-72b": 131072, "qwen2.5-7b": 131072, "qwen-2.5-7b": 131072,
     "qwen3-235b": 262144, "qwen-3-235b": 262144, "qwen3-32b": 131072, "qwen-3-32b": 131072,
@@ -175,7 +207,7 @@ CONTEXT_WINDOWS: dict[str, int] = {
     "mistral-7b": 32768, "ministral-8b": 128000, "ministral-3b": 128000,
     "codestral": 256000, "mixtral-8x22b": 65536, "mixtral-8x7b": 32768,
     # Gemma
-    "gemma-3-27b": 128000, "gemma-2-27b": 8192, "gemma-2-9b": 8192,
+    "gemma-4-31b": 256000, "gemma-3-27b": 128000, "gemma-2-27b": 8192, "gemma-2-9b": 8192,
     # xAI Grok
     "grok-3-mini": 131072, "grok-3": 131072, "grok-2": 131072,
     # Cohere
