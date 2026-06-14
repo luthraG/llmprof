@@ -41,11 +41,15 @@ def test_analyze_flags_duplicates():
 
 def test_analyze_caching_tip_for_uncached_prefix():
     tree = _tree(system=1200, tools=(("a", 300),))  # prefix 1500 >= 1024, not cached
-    res = analyze.analyze(tree, texts=[], input_per_1k=0.0025, cached_tokens=None)
+    res = analyze.analyze(tree, texts=[], input_per_1k=0.0025,
+                          cached_tokens=None, called_tools=["a"])
     tip = next(f for f in res["findings"] if "not cached" in f["title"])
-    assert tip["save_usd"] > 0  # recurring caching savings
-    # caching contributes dollars but not removable tokens
-    assert tip["reclaimable_tokens"] == 0
+    assert tip["save_usd"] > 0  # recurring caching savings, shown inline
+    assert tip["reclaimable_tokens"] == 0  # caching is not removable tokens
+    # ...and the caching tip must NOT inflate the headline reclaimable (no double
+    # counting against the prefix). With no duplicates/unused tools, headline is 0.
+    assert res["reclaimable_tokens"] == 0
+    assert res["reclaimable_usd"] == 0.0
 
 
 def test_analyze_does_not_suggest_caching_when_already_caching():

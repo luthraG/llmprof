@@ -147,10 +147,15 @@ def analyze(tree: dict, texts: list[str] | None = None, *, input_per_1k: float |
     if not any(f["severity"] != "ok" for f in findings):
         findings.append(_finding("ok", "No obvious waste detected", "This context looks lean."))
 
+    # The headline reclaimable is REMOVABLE tokens only (duplicates + unused tool
+    # schemas), priced once. We deliberately do NOT add the caching tip's saving:
+    # it overlaps with the prefix those tokens belong to (double counting), and it
+    # is a recurring cache-hit saving, not tokens you drop. The caching tip still
+    # shows its own per-call estimate inline.
     reclaimable_tokens = sum(f["reclaimable_tokens"] for f in findings)
-    reclaimable_usd = round(sum(f["save_usd"] for f in findings if f["save_usd"]), 6)
+    reclaimable_usd = _usd(reclaimable_tokens, input_per_1k) or 0.0
     return {
         "findings": findings,
         "reclaimable_tokens": reclaimable_tokens,
-        "reclaimable_usd": reclaimable_usd or 0.0,
+        "reclaimable_usd": reclaimable_usd,
     }
