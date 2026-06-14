@@ -285,6 +285,22 @@ def test_responses_api_is_attributed_and_cache_aware(tmp_path):
     assert "system prompt" in names and "tool schemas" in names
 
 
+def test_capture_nonstandard_url_path(tmp_path):
+    """A client that builds an odd URL (e.g. a doubled /v1) is still captured,
+    so tools like Codex are profiled regardless of how they assemble the path."""
+    app = create_app(db_path=str(tmp_path / "odd.db"), upstream="http://mock")
+    app.state.client = httpx.AsyncClient(transport=_mock({
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": "ok"}]}],
+        "usage": {"input_tokens": 50, "output_tokens": 3},
+    }))
+    client = TestClient(app)
+    # doubled /v1 prefix would normally fall through to an unrecorded passthrough
+    r = client.post("/v1/v1/responses", json={"model": "gpt-4o", "input": "hi"})
+    assert r.status_code == 200
+    traces = client.get("/llmprof/api/traces").json()["traces"]
+    assert traces and traces[0]["endpoint"] == "/v1/responses" and traces[0]["model"] == "gpt-4o"
+
+
 def test_api_ingest_rejects_bad_json(tmp_path):
     client = _client(tmp_path, "ing2.db")
     r = client.post("/llmprof/api/ingest", content=b"not json",

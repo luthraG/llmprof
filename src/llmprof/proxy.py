@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -38,6 +39,22 @@ _UI_JS = (_UI_DIR / "app.js").read_text(encoding="utf-8")
 
 def _forward_headers(request: Request) -> dict[str, str]:
     return {k: v for k, v in request.headers.items() if k.lower() not in _SKIP_HEADERS}
+
+
+def _dbg(msg: str) -> None:
+    if os.environ.get("LLMPROF_DEBUG"):
+        sys.stderr.write(f"llmprof: {msg}\n")
+        sys.stderr.flush()
+
+
+# any request path ending in one of these is captured, no matter how the client
+# built the URL (e.g. a doubled /v1, a custom prefix). Maps suffix -> (endpoint,
+# provider, wire) so tools like Codex are profiled regardless of base-URL quirks.
+_CAPTURE_SUFFIXES = [
+    ("/chat/completions", ("/v1/chat/completions", "openai", "chat")),
+    ("/responses", ("/v1/responses", "openai", "responses")),
+    ("/messages", ("/v1/messages", "anthropic", "messages")),
+]
 
 
 def create_app(db_path: str | None = None, upstream: str | None = None,
@@ -146,7 +163,17 @@ def create_app(db_path: str | None = None, upstream: str | None = None,
         "/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
     )
     async def passthrough(path: str, request: Request):
-        return await _proxy_raw(app, request, "/" + path)
+        full = "/" + path
+        # capture any POST whose path ends in a known suffix, even if the client
+        # built a non-canonical URL (Codex, odd base_urls). Explicit routes above
+        # already handle the canonical paths.
+        if request.method == "POST":
+            for suffix, (endpoint, provider, wire) in _CAPTURE_SUFFIXES:
+                if full.endswith(suffix):
+                    _dbg(f"capture {wire} via {full}")
+                    return await _handle(app, request, endpoint, provider, wire)
+        _dbg(f"passthrough {request.method} {full}")
+        return await _proxy_raw(app, request, full)
 
     return app
 
@@ -323,6 +350,7 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str, 
         payload = {}
 
     model = payload.get("model", "")
+    _dbg(f"handle {wire} {endpoint} model={model} stream={bool(payload.get('stream'))}")
     headers = _forward_headers(request)
     url = app.state.upstreams[provider] + endpoint   # route to the right provider
     started = time.time()
