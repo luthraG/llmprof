@@ -32,3 +32,16 @@ llmprof traces [--limit N]
 
 Reads the same local database the dashboard uses (`LLMPROF_HOME` /
 `LLMPROF_DB_URL` apply).
+
+## `llmprof reset`
+
+Delete all captured traces for a clean slate (the dashboard goes empty).
+
+```bash
+llmprof reset        # prompts for confirmation
+llmprof reset --yes  # skip the prompt
+```
+
+Useful after changing models or upgrading: analysis (cost, reclaimable) is stored
+per trace at capture time and is not recomputed, so old traces keep their old
+numbers. Resetting gives the aggregates a clean baseline.

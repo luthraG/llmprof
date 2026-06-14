@@ -261,6 +261,21 @@ def _mult(table: dict[str, float], model: str | None, default: float) -> float:
     return default
 
 
+def effective_input_per_1k(model: str | None, provider: str, fresh_input: int | None,
+                           cache_read: int | None, cache_write: int | None) -> float | None:
+    """The blended input price per 1k tokens for this call, accounting for cache
+    reads/writes. Use this to price reclaimable tokens so they reflect what those
+    tokens actually cost (cheap when cached), keeping reclaimable <= spend."""
+    rate = _match(model)
+    if not rate:
+        return None
+    billed = (fresh_input or 0) + (cache_read or 0) + (cache_write or 0)
+    if billed <= 0:
+        return rate[0]
+    input_cost = cost_cached(model, provider, fresh_input, cache_read, cache_write, 0)
+    return (input_cost or 0.0) / billed * 1000
+
+
 def cost_cached(model: str | None, provider: str, fresh_input: int | None,
                 cache_read: int | None, cache_write: int | None,
                 completion: int | None) -> float | None:

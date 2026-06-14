@@ -87,6 +87,17 @@ def test_session_groups_despite_mutated_middle_context(tmp_path):
     assert [t["turn"] for t in turns] == [1, 2, 3]
 
 
+def test_clear_wipes_traces(tmp_path):
+    st = SQLiteStore(str(tmp_path / "c.db"))
+    for _ in range(3):
+        st.record({"provider": "openai", "model": "gpt-4o", "prompt_tokens": 10,
+                   "completion_tokens": 1, "total_tokens": 11, "cost_usd": 0.0})
+    assert len(st.recent(10)) == 3
+    assert st.clear() == 3
+    assert st.recent(10) == []
+    assert st.clear() == 0  # idempotent
+
+
 def test_postgres_url_errors_clearly_until_backend_exists():
     # the door is open: a postgres URL is recognized and routed, and fails with
     # a clear message instead of silently falling back to SQLite.

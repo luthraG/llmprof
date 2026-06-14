@@ -108,9 +108,9 @@ def build_trace(model: str, provider: str, entries, called, usage: dict | None =
     completion = usage.get("completion") or 0
     cached = usage.get("cached") or 0
     fresh = max((prompt or 0) - cached, 0)
-    rate = pricing.rates(model)
+    eff = pricing.effective_input_per_1k(model, provider, fresh, cached, 0)
     ana = analyze.analyze(
-        tree, [e[3] for e in entries], input_per_1k=rate[0] if rate else None,
+        tree, [e[3] for e in entries], input_per_1k=eff,
         cached_tokens=cached, called_tools=called or None, model=model,
     )
     return {

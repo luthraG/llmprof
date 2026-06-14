@@ -74,6 +74,11 @@ class BaseStore(ABC):
         """Total reclaimable spend, projected to a month from the observed rate."""
         raise NotImplementedError
 
+    @abstractmethod
+    def clear(self) -> int:
+        """Delete all captured traces. Returns how many were removed."""
+        raise NotImplementedError
+
 
 def default_db_path() -> str:
     base = os.environ.get("LLMPROF_HOME") or os.path.join(Path.home(), ".llmprof")
@@ -374,6 +379,13 @@ class SQLiteStore(BaseStore):
                    FROM traces GROUP BY model ORDER BY cost DESC""",
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def clear(self) -> int:
+        """Delete all captured traces. Returns how many were removed."""
+        with self._connect() as conn:
+            n = conn.execute("SELECT COUNT(*) FROM traces").fetchone()[0]
+            conn.execute("DELETE FROM traces")
+        return n or 0
 
 
 def _sqlite_path_from_url(url: str) -> str | None:

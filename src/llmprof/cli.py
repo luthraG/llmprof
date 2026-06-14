@@ -110,6 +110,15 @@ def traces(limit: int = typer.Option(20, help="How many recent calls to show."))
 
 
 @app.command()
+def reset(yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation.")):
+    """Delete all captured traces (clears the dashboard for a clean slate)."""
+    if not yes:
+        typer.confirm("Delete all captured traces?", abort=True)
+    deleted = open_store().clear()
+    console.print(f"[green]Cleared {deleted} traces.[/]")
+
+
+@app.command()
 def version():
     """Print version."""
     console.print(f"llmprof {__version__}")

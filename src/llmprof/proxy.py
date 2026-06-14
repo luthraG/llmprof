@@ -443,10 +443,12 @@ def _record_blocking(app, provider, endpoint, model, payload, usage,
     if completion_tokens is None:
         completion_tokens = tokens.count_tokens(completion_text or "", model)
     total = (prompt_total or 0) + (completion_tokens or 0)
-    rate = pricing.rates(model)
+    # price reclaimable tokens at the effective (cache-aware) rate so the headline
+    # reflects what those tokens actually cost and never exceeds spend
+    eff = pricing.effective_input_per_1k(model, provider, fresh, read, write)
     analysis = analyze.analyze(
         breakdown["tree"], tokens.content_blocks(payload, provider),
-        input_per_1k=rate[0] if rate else None, cached_tokens=read, cache_write=write,
+        input_per_1k=eff, cached_tokens=read, cache_write=write,
         called_tools=called_tools, model=model or "gpt-4o",
     )
     app.state.store.record(
