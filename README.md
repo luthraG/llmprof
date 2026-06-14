@@ -35,6 +35,17 @@ client = OpenAI(base_url="http://127.0.0.1:4000/v1")  # that's the only change
 client.chat.completions.create(model="gpt-4o", messages=[...])
 ```
 
+Profiling Anthropic instead? Start the proxy pointed at Anthropic and set the
+SDK's base URL:
+
+```bash
+llmprof up --upstream https://api.anthropic.com
+```
+```python
+from anthropic import Anthropic
+client = Anthropic(base_url="http://127.0.0.1:4000")
+```
+
 Then see where the tokens went:
 
 ```bash
@@ -52,10 +63,10 @@ Everything runs locally; your prompts and keys never leave your machine.
 ## Status / roadmap
 
 - [x] OpenAI-compatible profiling proxy (streaming supported)
-- [x] Per-component token attribution (system / tools / history / input)
+- [x] Anthropic Messages API (`/v1/messages`) attribution, with exact usage from the stream
+- [x] Per-component token attribution (system / tools / history / input / tool calls / tool results)
 - [x] Cost estimation (OpenAI + Anthropic pricing)
 - [x] Local SQLite trace store + `llmprof traces`
-- [ ] Anthropic `/v1/messages` attribution
 - [ ] Flame-graph web UI (the wow) + context-growth timeline
 - [ ] Waste detector ("~$X/mo reclaimable")
 - [ ] SDK decorator for precise RAG / tool / step labels

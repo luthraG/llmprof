@@ -4,6 +4,10 @@ Point your client's base_url at this proxy. It forwards requests to the real
 provider unchanged (your API key passes straight through), and on the way it
 attributes the prompt tokens by component, prices the call, and records a trace
 locally. Streaming is supported (chunks are forwarded as they arrive).
+
+The request endpoint decides the request format we parse:
+  /v1/chat/completions -> OpenAI    /v1/messages -> Anthropic
+Anything else is proxied verbatim without attribution.
 """
 
 from __future__ import annotations
@@ -28,14 +32,6 @@ def _forward_headers(request: Request) -> dict[str, str]:
     return {k: v for k, v in request.headers.items() if k.lower() not in _SKIP_HEADERS}
 
 
-def _provider_of(upstream: str) -> str:
-    if "anthropic" in upstream:
-        return "anthropic"
-    if "openai" in upstream:
-        return "openai"
-    return "custom"
-
-
 def create_app(db_path: str | None = None, upstream: str | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -53,7 +49,11 @@ def create_app(db_path: str | None = None, upstream: str | None = None) -> FastA
 
     @app.post("/v1/chat/completions")
     async def chat_completions(request: Request):
-        return await _handle_chat(app, request)
+        return await _handle(app, request, "/v1/chat/completions", "openai")
+
+    @app.post("/v1/messages")
+    async def messages(request: Request):
+        return await _handle(app, request, "/v1/messages", "anthropic")
 
     @app.api_route(
         "/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
@@ -64,7 +64,86 @@ def create_app(db_path: str | None = None, upstream: str | None = None) -> FastA
     return app
 
 
-async def _handle_chat(app: FastAPI, request: Request):
+# --------------------------------------------------------------------------- #
+# Provider-aware attribution + usage extraction
+# --------------------------------------------------------------------------- #
+def _attribute(payload: dict, provider: str) -> dict:
+    model = payload.get("model", "")
+    if provider == "anthropic":
+        return tokens.attribute_anthropic(
+            payload.get("system"), payload.get("messages"), payload.get("tools"),
+            model or "claude-3-5-sonnet",
+        )
+    return tokens.attribute_openai(
+        payload.get("messages"), payload.get("tools") or payload.get("functions"),
+        model or "gpt-4o",
+    )
+
+
+def _usage_from_body(data: bytes, provider: str) -> tuple[int | None, int | None]:
+    try:
+        usage = json.loads(data).get("usage") or {}
+    except (json.JSONDecodeError, AttributeError):
+        return (None, None)
+    if provider == "anthropic":
+        return (usage.get("input_tokens"), usage.get("output_tokens"))
+    return (usage.get("prompt_tokens"), usage.get("completion_tokens"))
+
+
+def _scrape_openai(chunk: bytes, state: dict) -> None:
+    for obj in _sse_objects(chunk):
+        try:
+            delta = (obj.get("choices") or [{}])[0].get("delta", {}).get("content")
+            if delta:
+                state["text"].append(delta)
+            usage = obj.get("usage")  # present only with stream_options include_usage
+            if usage:
+                state["input"] = usage.get("prompt_tokens", state["input"])
+                state["output"] = usage.get("completion_tokens", state["output"])
+        except (KeyError, IndexError, AttributeError):
+            pass
+
+
+def _scrape_anthropic(chunk: bytes, state: dict) -> None:
+    for obj in _sse_objects(chunk):
+        t = obj.get("type")
+        if t == "message_start":
+            usage = (obj.get("message") or {}).get("usage") or {}
+            state["input"] = usage.get("input_tokens", state["input"])
+            state["output"] = usage.get("output_tokens", state["output"])
+        elif t == "content_block_delta":
+            text = (obj.get("delta") or {}).get("text")
+            if text:
+                state["text"].append(text)
+        elif t == "message_delta":
+            usage = obj.get("usage") or {}
+            if "output_tokens" in usage:
+                state["output"] = usage["output_tokens"]
+
+
+def _sse_objects(chunk: bytes):
+    """Yield parsed JSON objects from the data: lines of an SSE chunk."""
+    try:
+        lines = chunk.decode("utf-8", "ignore").splitlines()
+    except UnicodeDecodeError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if not data or data == "[DONE]":
+            continue
+        try:
+            yield json.loads(data)
+        except json.JSONDecodeError:
+            continue
+
+
+# --------------------------------------------------------------------------- #
+# Request handling
+# --------------------------------------------------------------------------- #
+async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
     body = await request.body()
     try:
         payload = json.loads(body) if body else {}
@@ -72,28 +151,31 @@ async def _handle_chat(app: FastAPI, request: Request):
         payload = {}
 
     model = payload.get("model", "")
-    messages = payload.get("messages", [])
-    tools = payload.get("tools") or payload.get("functions")
-    stream = bool(payload.get("stream"))
-
-    breakdown = tokens.attribute(messages, tools, model)
+    breakdown = _attribute(payload, provider)
     headers = _forward_headers(request)
-    url = app.state.upstream + "/v1/chat/completions"
+    url = app.state.upstream + endpoint
     started = time.time()
 
-    if stream:
+    if payload.get("stream"):
         req = app.state.client.build_request("POST", url, content=body, headers=headers)
         upstream = await app.state.client.send(req, stream=True)
         status = upstream.status_code
-        parts: list[str] = []
+        scrape = _scrape_anthropic if provider == "anthropic" else _scrape_openai
+        state = {"text": [], "input": None, "output": None}
 
         async def gen():
             async for chunk in upstream.aiter_raw():
                 yield chunk
-                _scrape_stream_content(chunk, parts)
+                scrape(chunk, state)
             await upstream.aclose()
-            completion_tokens = tokens.count_tokens("".join(parts), model)
-            _record(app, model, breakdown, completion_tokens, None, status, started, True)
+            prompt_tokens = state["input"] if state["input"] is not None else breakdown["total"]
+            completion_tokens = (
+                state["output"]
+                if state["output"] is not None
+                else tokens.count_tokens("".join(state["text"]), model)
+            )
+            _record(app, provider, model, breakdown, prompt_tokens, completion_tokens, status,
+                    started, True)
 
         return StreamingResponse(
             gen(),
@@ -103,13 +185,13 @@ async def _handle_chat(app: FastAPI, request: Request):
 
     upstream = await app.state.client.post(url, content=body, headers=headers)
     data = upstream.content
-    usage = None
-    try:
-        usage = json.loads(data).get("usage")
-    except (json.JSONDecodeError, AttributeError):
-        pass
-    completion_tokens = (usage or {}).get("completion_tokens", 0) or 0
-    _record(app, model, breakdown, completion_tokens, usage, upstream.status_code, started, False)
+    prompt_tokens, completion_tokens = _usage_from_body(data, provider)
+    if prompt_tokens is None:
+        prompt_tokens = breakdown["total"]
+    if completion_tokens is None:
+        completion_tokens = 0
+    _record(app, provider, model, breakdown, prompt_tokens, completion_tokens,
+            upstream.status_code, started, False)
     return Response(
         content=data,
         status_code=upstream.status_code,
@@ -117,38 +199,20 @@ async def _handle_chat(app: FastAPI, request: Request):
     )
 
 
-def _scrape_stream_content(chunk: bytes, parts: list[str]) -> None:
-    """Best-effort: pull assistant content deltas out of an SSE chunk."""
-    try:
-        for line in chunk.decode("utf-8", "ignore").splitlines():
-            line = line.strip()
-            if not line.startswith("data:"):
-                continue
-            data = line[5:].strip()
-            if not data or data == "[DONE]":
-                continue
-            obj = json.loads(data)
-            delta = (obj.get("choices") or [{}])[0].get("delta", {}).get("content")
-            if delta:
-                parts.append(delta)
-    except (UnicodeDecodeError, json.JSONDecodeError, KeyError, IndexError):
-        pass
-
-
-def _record(app, model, breakdown, completion_tokens, usage, status, started, streamed):
-    prompt_tokens = (usage or {}).get("prompt_tokens") or breakdown["total"]
-    total = prompt_tokens + completion_tokens
+def _record(app, provider, model, breakdown, prompt_tokens, completion_tokens, status,
+            started, streamed):
+    total = (prompt_tokens or 0) + (completion_tokens or 0)
     app.state.store.record(
         {
             "ts": started,
-            "provider": _provider_of(app.state.upstream),
+            "provider": provider,
             "model": model,
-            "endpoint": "/v1/chat/completions",
+            "endpoint": "/v1/messages" if provider == "anthropic" else "/v1/chat/completions",
             "status": status,
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "total_tokens": total,
-            "cost_usd": pricing.cost(model, prompt_tokens, completion_tokens),
+            "cost_usd": pricing.cost(model, prompt_tokens or 0, completion_tokens or 0),
             "streamed": streamed,
             "components": breakdown["components"],
         }
