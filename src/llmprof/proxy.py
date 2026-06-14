@@ -78,6 +78,17 @@ def create_app(db_path: str | None = None, upstream: str | None = None) -> FastA
             "models": app.state.store.model_summary(),
         }
 
+    @app.get("/llmprof/api/sessions")
+    async def api_sessions() -> dict:
+        return {"sessions": app.state.store.sessions()}
+
+    @app.get("/llmprof/api/sessions/{session_id}")
+    async def api_session(session_id: str) -> dict:
+        turns = app.state.store.session(session_id)
+        if not turns:
+            raise HTTPException(status_code=404, detail="session not found")
+        return {"session_id": session_id, "turns": turns}
+
     @app.get("/llmprof/api/traces/{trace_id}")
     async def api_trace(trace_id: int) -> dict:
         trace = app.state.store.get(trace_id)
@@ -233,6 +244,8 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
     headers = _forward_headers(request)
     url = app.state.upstream + endpoint
     started = time.time()
+    # optional explicit run id; overrides the prefix-chain heuristic when set
+    session_hint = request.headers.get("x-llmprof-session")
 
     if payload.get("stream"):
         req = app.state.client.build_request("POST", url, content=body, headers=headers)
@@ -250,7 +263,7 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
             await run_in_threadpool(
                 _record_blocking, app, provider, model, payload,
                 state["input"], state["output"], state["cached"], state["tools"],
-                "".join(state["text"]), status, started, True,
+                "".join(state["text"]), status, started, True, session_hint,
             )
 
         return StreamingResponse(
@@ -268,6 +281,7 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
     record = BackgroundTask(
         _record_blocking, app, provider, model, payload,
         usage_in, usage_out, cached, called, None, upstream.status_code, started, False,
+        session_hint,
     )
     return Response(
         content=data,
@@ -278,10 +292,12 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str):
 
 
 def _record_blocking(app, provider, model, payload, usage_in, usage_out, cached,
-                     called_tools, completion_text, status, started, streamed):
+                     called_tools, completion_text, status, started, streamed,
+                     session_hint=None):
     """All the CPU work (tokenization + attribution) and the DB write. Runs in a
     threadpool / background task so it never blocks the proxied request."""
     breakdown = _attribute(payload, provider)
+    msg_fp = tokens.message_fingerprint(payload, provider)
     prompt_tokens = usage_in if usage_in is not None else breakdown["total"]
     completion_tokens = (
         usage_out
@@ -305,6 +321,8 @@ def _record_blocking(app, provider, model, payload, usage_in, usage_out, cached,
             "detail": breakdown["tree"],
             "cached_tokens": cached,
             "called_tools": called_tools,
+            "msg_fp": msg_fp,
+            "session_hint": session_hint,
         }
     )
 

@@ -78,6 +78,39 @@ def test_traces_read_perf(tmp_path):
     print(f"\ntraces read: recent(100) over 500 rows in {dt * 1000:.1f} ms")
 
 
+def test_session_grouping_and_read_perf(tmp_path):
+    """Prefix-chaining must group long runs correctly and stay fast: 20 runs of
+    8 growing turns each, then the sessions/session reads the timeline polls."""
+    st = Store(str(tmp_path / "sess.db"))
+    comp = {"system prompt": 80, "history (assistant)": 40}
+    detail = {"name": "context", "tokens": 120,
+              "children": [{"name": "system prompt", "tokens": 80, "children": []}]}
+    t0 = time.perf_counter()
+    for r in range(20):
+        fp = [f"s:sys{r}", f"u:u{r}0"]
+        for turn in range(8):
+            st.record({
+                "provider": "openai", "model": "gpt-4o", "prompt_tokens": 120,
+                "completion_tokens": 10, "total_tokens": 130, "cost_usd": 0.001,
+                "components": comp, "detail": detail, "msg_fp": list(fp),
+            })
+            fp = fp + [f"a:a{r}_{turn}", f"u:u{r}_{turn}"]
+    write_dt = time.perf_counter() - t0
+
+    runs = st.sessions(limit=100)
+    assert len(runs) == 20, f"expected 20 distinct runs, got {len(runs)}"
+    assert all(x["turns"] == 8 for x in runs), "every run should chain to 8 turns"
+
+    t1 = time.perf_counter()
+    turns = st.session(runs[0]["session_id"])
+    st.sessions()
+    read_dt = time.perf_counter() - t1
+    assert [t["turn"] for t in turns] == list(range(1, 9))
+    assert read_dt < 0.5, f"session reads too slow: {read_dt * 1000:.1f} ms"
+    print(f"\nsessions: 160 prefix-resolved writes in {write_dt * 1000:.0f} ms, "
+          f"reads in {read_dt * 1000:.1f} ms")
+
+
 def test_proxy_handles_concurrent_load(tmp_path):
     asyncio.run(_run_load(tmp_path, requests=100))
 

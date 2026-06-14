@@ -113,6 +113,28 @@ def test_anthropic_tool_result_as_blocks():
     assert result["components"].get("tool results", 0) > 0
 
 
+def test_message_fingerprint_prefix_chain():
+    """Turn N's fingerprint is a strict prefix of turn N+1's, for both providers."""
+    t1 = {"messages": [{"role": "system", "content": "sys"}, {"role": "user", "content": "q1"}]}
+    t2 = {"messages": t1["messages"] + [{"role": "assistant", "content": "a1"},
+                                        {"role": "user", "content": "q2"}]}
+    fp1 = tokens.message_fingerprint(t1, "openai")
+    fp2 = tokens.message_fingerprint(t2, "openai")
+    assert len(fp1) == 2 and len(fp2) == 4
+    assert fp2[: len(fp1)] == fp1  # earlier turn is a prefix of the later one
+
+    a1 = {"system": "sys", "messages": [{"role": "user", "content": "hi"}]}
+    a2 = {"system": "sys", "messages": a1["messages"] + [{"role": "assistant", "content": "yo"},
+                                                         {"role": "user", "content": "more"}]}
+    fa1 = tokens.message_fingerprint(a1, "anthropic")
+    fa2 = tokens.message_fingerprint(a2, "anthropic")
+    assert fa1[0].startswith("s:")  # system is part of the chain root for Anthropic
+    assert fa2[: len(fa1)] == fa1
+    # an unrelated conversation does not share the prefix
+    other = tokens.message_fingerprint({"messages": [{"role": "user", "content": "zzz"}]}, "openai")
+    assert other != fp1[: len(other)]
+
+
 def test_pricing_known_and_unknown():
     c = pricing.cost("gpt-4o", 1000, 1000)
     assert c == round(0.0025 + 0.01, 6)

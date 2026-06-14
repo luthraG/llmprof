@@ -10,6 +10,7 @@ tiktoken-based and approximate for non-OpenAI models.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from functools import lru_cache
 
@@ -194,6 +195,41 @@ def attribute_anthropic(
         )
 
     return _assemble(nodes, 0, model)
+
+
+# --------------------------------------------------------------------------- #
+# Conversation fingerprinting (groups calls of one agent run into a session)
+# --------------------------------------------------------------------------- #
+def _fp(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8", "ignore")).hexdigest()[:12]
+
+
+def message_fingerprint(payload: dict | None, provider: str) -> list[str]:
+    """Ordered per-message fingerprints for a request.
+
+    Turn N+1 of a conversation sends turn N's messages plus a few new ones, so
+    turn N's fingerprint is a prefix of turn N+1's. The store uses that prefix
+    relationship to chain consecutive calls into one session (context creep),
+    with no code change from the caller.
+    """
+    payload = payload or {}
+    fps: list[str] = []
+    if provider == "anthropic":
+        system = payload.get("system")
+        if system:
+            text = system if isinstance(system, str) else " ".join(
+                b.get("text", "") for b in system if isinstance(b, dict)
+            )
+            fps.append("s:" + _fp(text))
+        for message in payload.get("messages") or []:
+            role = message.get("role", "user")
+            text = " ".join(t for _, t in _anthropic_message_parts(message))
+            fps.append(role[:1] + ":" + _fp(text))
+    else:
+        for message in payload.get("messages") or []:
+            role = message.get("role", "user")
+            fps.append(role[:1] + ":" + _fp(_openai_message_text(message)))
+    return fps
 
 
 # Back-compat alias (OpenAI was the first provider supported).

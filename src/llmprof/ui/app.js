@@ -25,7 +25,8 @@ let focusPath = [];   // array of nodes from root to current focus
 let CURRENT_TRACE = null;
 let sortBy = "recent";
 let modelFilter = "";
-let view = "calls";  // "calls" | "trends"
+let view = "calls";  // "calls" | "trends" | "timeline"
+let selectedSession = null;
 
 async function load() {
   const r = await fetch("/llmprof/api/traces?limit=100");
@@ -35,6 +36,7 @@ async function load() {
   renderKpis();
   renderCalls();
   if (view === "trends") { renderTrends(); return; }
+  if (view === "timeline") { renderTimeline(); return; }
   if (selectedId == null && TRACES.length) select(TRACES[0].id);
   else if (selectedId != null && !TRACES.find(t => t.id === selectedId) && TRACES.length) select(TRACES[0].id);
   else if (!TRACES.length) renderEmpty();
@@ -98,9 +100,92 @@ function setView(v) {
   view = v;
   document.querySelectorAll("#viewToggle button").forEach(b => b.classList.toggle("seg-on", b.dataset.view === v));
   if (v === "trends") renderTrends(true);
+  else if (v === "timeline") renderTimeline(true);
   else if (selectedId != null) select(selectedId);
   else if (TRACES.length) select(TRACES[0].id);
   else renderEmpty();
+}
+
+// stack components bottom-to-top in a stable order so colors stay put per turn
+const STACK_ORDER = ["system prompt", "tool schemas", "user input",
+  "history (assistant)", "tool calls", "tool results"];
+
+let _timelineSig = null;
+async function renderTimeline(force) {
+  const main = $("#main");
+  let data;
+  try { data = await (await fetch("/llmprof/api/sessions")).json(); }
+  catch (e) { return; }
+  const runs = data.sessions || [];
+  if (!runs.length) {
+    if (force || !$("#main .timeline-empty")) {
+      main.innerHTML = `<div class="empty timeline-empty"><h2>No multi-turn runs yet</h2>`+
+        `<div>Point a chat loop or agent at the proxy. Each follow-up call that extends `+
+        `the previous one is chained into a run, and you will see its context grow here.</div></div>`;
+    }
+    _timelineSig = "empty";
+    return;
+  }
+  if (!selectedSession || !runs.find(r => r.session_id === selectedSession)) {
+    selectedSession = runs[0].session_id;
+  }
+  const run = runs.find(r => r.session_id === selectedSession) || runs[0];
+  const sig = selectedSession + ":" + run.turns + ":" + run.last + ":" + runs.length;
+  if (!force && _timelineSig === sig && $("#main .timeline-wrap")) return;
+  _timelineSig = sig;
+
+  let turns = [];
+  try { turns = (await (await fetch("/llmprof/api/sessions/" + selectedSession)).json()).turns || []; }
+  catch (e) { return; }
+
+  const comps = turns.map(t => t.components || {});
+  const totals = comps.map(c => Object.values(c).reduce((a, b) => a + b, 0));
+  const maxT = Math.max(...totals, 1);
+  const keys = STACK_ORDER.filter(k => comps.some(c => c[k]))
+    .concat([...new Set(comps.flatMap(c => Object.keys(c)))].filter(k => !STACK_ORDER.includes(k)));
+
+  const cols = turns.map((t, i) => {
+    const segs = keys.filter(k => comps[i][k]).map(k => {
+      const h = comps[i][k] / maxT * 200;
+      return `<div class="seg2" style="height:${h.toFixed(1)}px;background:${CAT[k] || '#8b98a5'}" `+
+             `title="turn ${t.turn} &middot; ${esc(k)}: ${fmt(comps[i][k])} tok"></div>`;
+    }).join("");
+    return `<div class="tcol" title="turn ${t.turn}: ${fmt(totals[i])} tok &middot; ${money(t.cost_usd)}">`+
+           `<div class="tstack">${segs}</div><div class="tnum">${t.turn}</div></div>`;
+  }).join("");
+
+  const first = totals[0] || 1, last = totals[totals.length - 1] || 0;
+  const growth = (last / first);
+  const lastC = comps[comps.length - 1] || {};
+  const histLast = (lastC["history (assistant)"] || 0) + (lastC["tool results"] || 0);
+  const histPct = last ? histLast / last * 100 : 0;
+  const runCost = turns.reduce((a, t) => a + (t.cost_usd || 0), 0);
+
+  const legend = keys.map(k =>
+    `<span class="tl-leg"><span class="sw" style="background:${CAT[k] || '#8b98a5'}"></span>${esc(k)}</span>`).join("");
+
+  const picker = runs.map(r => ({
+    value: r.session_id,
+    label: `${r.model || 'run'} · ${r.turns} turns · ${money(r.cost)}`,
+  }));
+
+  main.innerHTML =
+    `<div class="detail-head"><div class="dh-title"><h1>Context timeline</h1>`+
+    `<div class="meta">how one run's context grows turn over turn</div></div>`+
+    `<div class="tl-pick" id="tlPick"></div></div>`+
+    `<div class="trends-cards timeline-wrap">`+
+    `<div class="tcard"><div class="tlabel">turns</div><div class="tval">${turns.length}</div></div>`+
+    `<div class="tcard"><div class="tlabel">context growth</div><div class="tval">${growth.toFixed(1)}&times;</div>`+
+    `<span class="delta ${growth >= 1.5 ? 'up' : 'flat'}">turn 1 to ${turns.length}</span></div>`+
+    `<div class="tcard"><div class="tlabel">history at last turn</div><div class="tval">${histPct.toFixed(0)}%</div>`+
+    `<span class="delta ${histPct >= 40 ? 'up' : 'flat'}">${fmt(histLast)} tok</span></div>`+
+    `<div class="tcard cost"><div class="tlabel">run cost</div><div class="tval">${money(runCost)}</div></div>`+
+    `</div>`+
+    `<div class="panel"><div class="panel-title"><span>prompt tokens per turn</span></div>`+
+    `<div class="tlchart">${cols}</div><div class="tl-legend">${legend}</div></div>`;
+
+  const host = $("#tlPick");
+  if (host) dropdown(host, picker, selectedSession, (v) => { selectedSession = v; renderTimeline(true); });
 }
 
 function renderKpis() {

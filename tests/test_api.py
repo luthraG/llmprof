@@ -120,6 +120,59 @@ def test_api_trace_404(tmp_path):
     assert client.get("/llmprof/api/traces/999999").status_code == 404
 
 
+def _client(tmp_path, name="s.db"):
+    app = create_app(db_path=str(tmp_path / name), upstream="http://mock")
+    app.state.client = httpx.AsyncClient(
+        transport=_mock(
+            {
+                "choices": [{"message": {"content": "ok"}}],
+                "usage": {"prompt_tokens": 30, "completion_tokens": 5, "total_tokens": 35},
+            }
+        )
+    )
+    return TestClient(app)
+
+
+def test_api_sessions_chains_turns(tmp_path):
+    """Consecutive calls that extend the previous one group into one run; an
+    unrelated call starts its own. Only multi-turn runs are listed."""
+    client = _client(tmp_path)
+    msgs = [{"role": "system", "content": "agent"}, {"role": "user", "content": "turn 1"}]
+    for i in range(3):
+        client.post("/v1/chat/completions", json={"model": "gpt-4o", "messages": msgs})
+        msgs = msgs + [{"role": "assistant", "content": f"a{i}"},
+                       {"role": "user", "content": f"u{i}"}]
+    # an unrelated single call
+    client.post("/v1/chat/completions",
+                json={"model": "gpt-4o", "messages": [{"role": "user", "content": "unrelated"}]})
+
+    sessions = client.get("/llmprof/api/sessions").json()["sessions"]
+    assert len(sessions) == 1  # the single call is not a multi-turn run
+    run = sessions[0]
+    assert run["turns"] == 3 and run["model"] == "gpt-4o"
+
+    turns = client.get(f"/llmprof/api/sessions/{run['session_id']}").json()["turns"]
+    assert [t["turn"] for t in turns] == [1, 2, 3]
+    assert turns[0]["components"]  # each turn carries its component breakdown
+
+
+def test_api_session_header_override(tmp_path):
+    """The x-llmprof-session header forces grouping even without a prefix match."""
+    client = _client(tmp_path, "h.db")
+    headers = {"x-llmprof-session": "run-xyz"}
+    client.post("/v1/chat/completions", headers=headers,
+                json={"model": "gpt-4o", "messages": [{"role": "user", "content": "alpha"}]})
+    client.post("/v1/chat/completions", headers=headers,
+                json={"model": "gpt-4o", "messages": [{"role": "user", "content": "different"}]})
+    turns = client.get("/llmprof/api/sessions/run-xyz").json()["turns"]
+    assert [t["turn"] for t in turns] == [1, 2]
+
+
+def test_api_session_404(tmp_path):
+    client = _app_with_one_trace(tmp_path)
+    assert client.get("/llmprof/api/sessions/nope").status_code == 404
+
+
 def test_passthrough_proxies_other_paths(tmp_path):
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v1/models"
