@@ -324,7 +324,9 @@ class SQLiteStore(BaseStore):
     def reclaimable_summary(self) -> dict:
         """Reclaimable spend across recorded calls. The percent of spend and the
         absolute reclaimable are always trustworthy; a per-month projection is
-        only included once there is enough data (`projectable`)."""
+        only included once there is enough data (`projectable`). `actions` ranks
+        the concrete things to do about it, aggregated from the per-call
+        findings, so the headline number comes with a how, not just a how-much."""
         with self._connect() as conn:
             r = conn.execute(
                 """SELECT COUNT(*) AS calls,
@@ -333,6 +335,9 @@ class SQLiteStore(BaseStore):
                           MIN(ts) AS first_ts, MAX(ts) AS last_ts
                    FROM traces WHERE reclaimable_usd IS NOT NULL"""
             ).fetchone()
+            findings_rows = conn.execute(
+                "SELECT analysis FROM traces WHERE analysis IS NOT NULL"
+            ).fetchall()
         calls = r["calls"] or 0
         reclaimable, cost = r["reclaimable"] or 0.0, r["cost"] or 0.0
         span_s = max((r["last_ts"] or 0) - (r["first_ts"] or 0), 0)
@@ -346,6 +351,7 @@ class SQLiteStore(BaseStore):
             "projectable": projectable,
             "monthly_reclaimable_usd": None,
             "monthly_calls": None,
+            "actions": _rank_actions(findings_rows),
         }
         if projectable:
             days = span_s / 86400
@@ -386,6 +392,61 @@ class SQLiteStore(BaseStore):
             n = conn.execute("SELECT COUNT(*) FROM traces").fetchone()[0]
             conn.execute("DELETE FROM traces")
         return n or 0
+
+
+# Each per-call finding maps to one of a few concrete actions. Keyed by a stable
+# category (so "3 of 12 tools unused" and "5 of 20 tools unused" merge) -> the
+# fix to surface. Order here is the tie-break when savings are equal.
+_ACTIONS = [
+    ("unused-tools", "tools were not called",
+     "Drop tools the model does not use on a given call, or load them lazily."),
+    ("duplicate", "Duplicated content",
+     "Dedupe repeated context, instructions, or retrieved chunks."),
+    ("uncached-prefix", "not cached",
+     "Turn on prompt caching for your stable system + tools prefix."),
+    ("tool-heavy", "Tool schemas are",
+     "Trim tool descriptions and parameter lists, or split rarely used tools out."),
+    ("history", "History and tool results",
+     "Summarize or truncate older turns to slow context creep."),
+    ("large-system", "Large system prompt",
+     "Trim the system prompt; move examples to a cached prefix."),
+]
+
+
+def _classify_finding(title: str) -> tuple[str, str] | None:
+    for category, needle, fix in _ACTIONS:
+        if needle in title:
+            return category, fix
+    return None
+
+
+def _rank_actions(rows: list, limit: int = 4) -> list[dict]:
+    """Aggregate per-call findings into ranked, actionable suggestions: what to
+    do about the reclaimable spend, how many calls it affects, and the dollars
+    and tokens it touches. Ranked by dollars, then tokens, then call count."""
+    agg: dict[str, dict] = {}
+    for row in rows:
+        try:
+            analysis = json.loads(row["analysis"])
+        except (TypeError, ValueError):
+            continue
+        for f in (analysis or {}).get("findings", []):
+            if f.get("severity") == "ok":
+                continue
+            hit = _classify_finding(f.get("title", ""))
+            if not hit:
+                continue
+            category, fix = hit
+            a = agg.setdefault(category, {"action": fix, "calls": 0,
+                                          "save_usd": 0.0, "tokens": 0})
+            a["calls"] += 1
+            a["save_usd"] += f.get("save_usd") or 0.0
+            a["tokens"] += f.get("reclaimable_tokens") or 0
+    ranked = sorted(agg.values(),
+                    key=lambda a: (a["save_usd"], a["tokens"], a["calls"]), reverse=True)
+    for a in ranked:
+        a["save_usd"] = round(a["save_usd"], 6)
+    return ranked[:limit]
 
 
 def _sqlite_path_from_url(url: str) -> str | None:

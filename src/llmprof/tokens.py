@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from functools import lru_cache
 
 import tiktoken
@@ -298,25 +299,51 @@ def content_blocks(payload: dict | None, provider: str) -> list[str]:
     return [b for b in blocks if b]
 
 
+def _is_header_like(text: str) -> bool:
+    """True for a line that is metadata, not prose: a single header-style token
+    then a colon (e.g. `x-anthropic-billing-header: cc_version=2.1.177.288`).
+    Agents like Claude Code prepend such blocks, and their volatile version
+    strings would otherwise fragment one template into a row per release."""
+    head = text.strip()[:80]
+    token = head.split(":", 1)[0] if ":" in head else ""
+    return bool(token) and " " not in token and re.match(r"^[A-Za-z][\w.-]*$", token) is not None
+
+
+def _route_snippet(candidates: list[str]) -> str:
+    """First substantive (non header-like) system text from the candidates."""
+    for text in candidates:
+        flat = " ".join((text or "").split())
+        if flat and not _is_header_like(flat):
+            return flat[:60]
+    # everything was header-like (or empty): fall back to the first non-empty
+    for text in candidates:
+        flat = " ".join((text or "").split())
+        if flat:
+            return flat[:60]
+    return ""
+
+
 def route_label(payload: dict | None, provider: str) -> str:
     """A short, human-readable signature of a call's reusable template: the start
     of the system prompt plus how many tools it ships. Calls that share this are
-    the same 'route', so the leaderboard can total cost per prompt template."""
+    the same 'route', so the leaderboard can total cost per prompt template.
+
+    Leading metadata blocks (billing/version headers some agents prepend) are
+    skipped so the label is readable and groups across releases."""
     payload = payload or {}
     if provider == "anthropic":
         system = payload.get("system")
-        sys_text = system if isinstance(system, str) else " ".join(
-            b.get("text", "") for b in (system or []) if isinstance(b, dict)
-        )
+        candidates = ([system] if isinstance(system, str)
+                      else [b.get("text", "") for b in (system or []) if isinstance(b, dict)])
         tools = payload.get("tools") or []
     else:
-        sys_text = ""
+        candidates = []
         for message in payload.get("messages") or []:
             if message.get("role") == "system":
-                sys_text = _openai_message_text(message)
+                candidates.append(_openai_message_text(message))
                 break
         tools = payload.get("tools") or payload.get("functions") or []
-    snippet = " ".join(sys_text.split())[:60] or "(no system prompt)"
+    snippet = _route_snippet(candidates) or "(no system prompt)"
     return snippet + (f"  +{len(tools)} tools" if tools else "")
 
 

@@ -67,6 +67,34 @@ def test_reclaimable_projection_is_gated(tmp_path):
     assert big["monthly_reclaimable_usd"] is not None and big["monthly_calls"] > 0
 
 
+def test_reclaimable_summary_ranks_actionable_fixes(tmp_path):
+    """The headline reclaimable number comes with a ranked how-to, aggregated
+    from the per-call findings, sorted by dollars saved."""
+    st = SQLiteStore(str(tmp_path / "act.db"))
+    base = {"provider": "anthropic", "model": "claude-opus-4-8", "prompt_tokens": 1000,
+            "completion_tokens": 10, "total_tokens": 1010, "cost_usd": 0.05}
+    # unused tool schemas: cheap per call but on every call
+    for _ in range(5):
+        st.record({**base, "reclaimable_usd": 0.01, "analysis": {"findings": [
+            {"severity": "warn", "title": "3 of 12 tools were not called",
+             "reclaimable_tokens": 200, "save_usd": 0.01}]}})
+    # one big duplicate-content finding worth more dollars
+    st.record({**base, "reclaimable_usd": 0.30, "analysis": {"findings": [
+        {"severity": "warn", "title": "Duplicated content in the context",
+         "reclaimable_tokens": 5000, "save_usd": 0.30},
+        {"severity": "ok", "title": "Prompt caching is active"}]}})
+
+    summary = st.reclaimable_summary()
+    actions = summary["actions"]
+    assert [a["action"][:5] for a in actions][:2] == ["Dedup", "Drop "]  # $0.30 ranks above $0.05
+    dedupe = actions[0]
+    assert dedupe["calls"] == 1 and dedupe["save_usd"] == 0.30 and dedupe["tokens"] == 5000
+    unused = actions[1]
+    assert unused["calls"] == 5 and round(unused["save_usd"], 2) == 0.05
+    # the "ok" finding is never surfaced as an action
+    assert all("caching is active" not in a["action"] for a in actions)
+
+
 def test_session_groups_despite_mutated_middle_context(tmp_path):
     """Agents (Claude Code, Codex) mutate earlier context between calls, so a
     strict prefix chain misses them. Calls sharing a conversation root still group."""

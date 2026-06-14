@@ -157,6 +157,26 @@ def test_route_label_groups_by_template():
     assert "Be concise" in tokens.route_label({"system": "Be concise", "messages": []}, "anthropic")
 
 
+def test_route_label_skips_volatile_metadata_blocks():
+    """Claude Code prepends a billing/version header block; its volatile version
+    string must not become the label nor fragment one template into a row per
+    release. The label should be the real system prose and group across versions."""
+    def payload(version):
+        return {"system": [
+            {"type": "text", "text": f"x-anthropic-billing-header: cc_version={version}; cc_entry"},
+            {"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude."},
+        ], "tools": [{"name": "Bash"}, {"name": "Read"}]}
+
+    a = tokens.route_label(payload("2.1.177.288"), "anthropic")
+    b = tokens.route_label(payload("2.1.176.217"), "anthropic")
+    assert "billing-header" not in a and "cc_version" not in a
+    assert "Claude Code" in a and "+2 tools" in a
+    assert a == b  # different releases collapse to one template
+    # if every block is header-like, fall back rather than show nothing
+    only_meta = {"system": [{"type": "text", "text": "x-foo: bar"}]}
+    assert tokens.route_label(only_meta, "anthropic").startswith("x-foo")
+
+
 def test_pricing_known_and_unknown():
     c = pricing.cost("gpt-4o", 1000, 1000)
     assert c == round(0.0025 + 0.01, 6)
