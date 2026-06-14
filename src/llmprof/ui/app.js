@@ -98,14 +98,22 @@ async function renderTrends(force) {
       `<div class="routes">${routeRows}</div></div>`
     : "";
   const flameIcon = '<svg width="34" height="34" viewBox="0 0 24 24" fill="#f7a13b"><path d="M13 2c.9 3.2-2.2 4.3-2.2 7.4a2.8 2.8 0 005.6.2c0-1-.4-1.9-1-2.8 2.2 1 4 3.2 4 6.1A7.4 7.4 0 015 13.2C5 8.6 9.4 6.6 13 2z"/></svg>';
-  const recBanner = (rec.reclaimable_usd > 0)
-    ? `<div class="reclaim-banner"><span class="rb-ic">${flameIcon}</span>`+
+  let recBanner = "";
+  if (rec.reclaimable_usd > 0 && rec.projectable) {
+    recBanner = `<div class="reclaim-banner"><span class="rb-ic">${flameIcon}</span>`+
       `<div class="rb-main"><div class="rb-label">reclaimable / mo</div>`+
       `<div class="rb-val">${money(rec.monthly_reclaimable_usd)}</div></div>`+
       `<div class="rb-meta"><span>~${rec.pct}% of spend</span>`+
       `<span>projected from ${fmt(rec.monthly_calls)} calls/mo</span>`+
-      `<span>${fmt(rec.calls)} calls analyzed</span></div></div>`
-    : "";
+      `<span>${fmt(rec.calls)} calls analyzed</span></div></div>`;
+  } else if (rec.reclaimable_usd > 0) {
+    // not enough data to project a month yet; show the trustworthy numbers
+    recBanner = `<div class="reclaim-banner"><span class="rb-ic">${flameIcon}</span>`+
+      `<div class="rb-main"><div class="rb-label">reclaimable</div>`+
+      `<div class="rb-val">~${rec.pct}% of spend</div></div>`+
+      `<div class="rb-meta"><span>${money(rec.reclaimable_usd)} across ${fmt(rec.calls)} calls so far</span>`+
+      `<span>capture ~a day of usage for a /mo estimate</span></div></div>`;
+  }
   main.innerHTML =
     `<div class="detail-head"><div class="dh-title"><h1>Trends</h1>`+
     `<div class="meta">daily usage across all captured calls</div></div></div>`+

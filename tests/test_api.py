@@ -118,7 +118,9 @@ def test_api_summary(tmp_path):
     assert any(m["model"] == "gpt-4o" for m in s["models"])
     assert s["routes"] and "+1 tools" in s["routes"][0]["route"]
     assert "reclaimable" in s and s["reclaimable"]["calls"] == 1
-    assert "monthly_reclaimable_usd" in s["reclaimable"]
+    # one call is far too little to project a month: no /mo figure, just % + absolute
+    assert s["reclaimable"]["projectable"] is False
+    assert s["reclaimable"]["monthly_reclaimable_usd"] is None
 
 
 def test_api_routes_leaderboard(tmp_path):

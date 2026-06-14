@@ -285,9 +285,16 @@ class SQLiteStore(BaseStore):
             out.append(d)
         return out
 
+    # a monthly projection is only meaningful with enough spread-out data;
+    # below this we show the scale-invariant numbers instead of extrapolating
+    # a short burst to 24/7 (which produced absurd, wildly swinging figures).
+    _PROJECT_MIN_CALLS = 50
+    _PROJECT_MIN_SPAN_S = 12 * 3600  # 12 hours
+
     def reclaimable_summary(self) -> dict:
-        """Total reclaimable spend across recorded calls, projected to a month
-        from the observed call rate. The headline savings number."""
+        """Reclaimable spend across recorded calls. The percent of spend and the
+        absolute reclaimable are always trustworthy; a per-month projection is
+        only included once there is enough data (`projectable`)."""
         with self._connect() as conn:
             r = conn.execute(
                 """SELECT COUNT(*) AS calls,
@@ -298,15 +305,23 @@ class SQLiteStore(BaseStore):
             ).fetchone()
         calls = r["calls"] or 0
         reclaimable, cost = r["reclaimable"] or 0.0, r["cost"] or 0.0
-        span_days = max((r["last_ts"] or 0) - (r["first_ts"] or 0), 0) / 86400 or 1
-        return {
+        span_s = max((r["last_ts"] or 0) - (r["first_ts"] or 0), 0)
+        projectable = calls >= self._PROJECT_MIN_CALLS and span_s >= self._PROJECT_MIN_SPAN_S
+        out = {
             "calls": calls,
             "reclaimable_usd": round(reclaimable, 6),
             "cost_usd": round(cost, 6),
             "pct": round(reclaimable / cost * 100, 1) if cost else 0,
-            "monthly_reclaimable_usd": round(reclaimable / span_days * 30, 2),
-            "monthly_calls": int(calls / span_days * 30),
+            "span_seconds": int(span_s),
+            "projectable": projectable,
+            "monthly_reclaimable_usd": None,
+            "monthly_calls": None,
         }
+        if projectable:
+            days = span_s / 86400
+            out["monthly_reclaimable_usd"] = round(reclaimable / days * 30, 2)
+            out["monthly_calls"] = int(calls / days * 30)
+        return out
 
     def routes(self, limit: int = 15) -> list[dict]:
         """Most expensive prompt templates (system prompt + tool set), so you can
