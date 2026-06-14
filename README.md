@@ -10,7 +10,10 @@
 </p>
 
 <p align="center">
-  <img src="assets/demo.gif" alt="llmprof: point your base_url at the proxy and see a flame graph of where every token went, plus the dollars you can reclaim" width="900">
+  <img src="assets/demo.webp" alt="llmprof: point your base_url at the proxy and see a flame graph of where every token went, plus the dollars you can reclaim" width="920">
+</p>
+<p align="center">
+  <sub>lossless animation; a <a href="assets/demo.gif">GIF version</a> is also available</sub>
 </p>
 
 You profile CPU and memory. Why fly blind on the most expensive resource in your
