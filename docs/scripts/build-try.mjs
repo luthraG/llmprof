@@ -43,11 +43,29 @@ copyFileSync(join(uiDir, "app.js"), join(outDir, "app.js"));
 copyFileSync(join(uiDir, "app.css"), join(outDir, "app.css"));
 
 let html = readFileSync(join(uiDir, "index.html"), "utf8");
+// Social-card metadata for the most-shared launch link. The dashboard shell has
+// none (it is an app, not a page); the demo is what people paste into chats and
+// timelines, so it gets a proper preview card. Reuses the live docs og.png.
+const ogMeta = [
+  '<title>llmprof - live demo</title>',
+  '<meta property="og:title" content="llmprof - live demo">',
+  '<meta property="og:description" content="Try the llmprof dashboard in your browser. A flame graph of where every token and dollar goes in an LLM call, on a recorded session. No install.">',
+  '<meta property="og:image" content="https://luthrag.github.io/llmprof/og.png">',
+  '<meta property="og:image:width" content="1200">',
+  '<meta property="og:image:height" content="630">',
+  '<meta property="og:url" content="https://luthrag.github.io/llmprof/try/">',
+  '<meta property="og:type" content="website">',
+  '<meta name="twitter:card" content="summary_large_image">',
+  '<meta name="twitter:title" content="llmprof - live demo">',
+  '<meta name="twitter:description" content="The llmprof dashboard in your browser, on a recorded session. See where every token and dollar goes. No install.">',
+  '<meta name="twitter:image" content="https://luthrag.github.io/llmprof/og.png">',
+].join("\n");
+
 html = html
   .replaceAll("/llmprof/app.css", "./app.css")
   .replaceAll("/llmprof/app.js", "./app.js")
   .replace("__ASSET_VER__", ver)
-  .replace("<title>llmprof</title>", "<title>llmprof - live demo</title>")
+  .replace("<title>llmprof</title>", ogMeta)
   // load the shim before the app so the fetch interceptor is in place first
   .replace('<script src="./app.js"></script>', '<script src="./demo.js"></script>\n<script src="./app.js"></script>');
 
