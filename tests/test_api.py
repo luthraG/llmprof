@@ -340,6 +340,34 @@ def test_upstream_request_forces_identity_encoding(tmp_path):
     assert seen["accept-encoding"] == "identity"
 
 
+def test_unreachable_upstream_returns_clean_502(tmp_path):
+    """When the upstream is unreachable the proxy must return a clean 502, not a
+    500 ASGI traceback. Covers both the buffered and the streaming path."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("all connection attempts failed")
+
+    app = create_app(db_path=str(tmp_path / "g.db"), upstream="http://mock")
+    app.state.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = TestClient(app)
+    base = {"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]}
+    r = client.post("/v1/chat/completions", json=base)
+    assert r.status_code == 502 and r.json()["error"]["type"] == "upstream_unreachable"
+    rs = client.post("/v1/chat/completions", json={**base, "stream": True})
+    assert rs.status_code == 502
+
+
+def test_dashboard_self_heals_stale_tab(tmp_path):
+    """The asset version is baked into the HTML and reported by /api/traces, so a
+    stale tab can detect a restarted proxy and reload itself."""
+    app = create_app(db_path=str(tmp_path / "v.db"), upstream="http://mock")
+    client = TestClient(app)
+    html = client.get("/").text
+    assert "__ASSET_VER__" not in html  # placeholder was substituted
+    assert "window.__LLMPROF_VER" in html
+    ver = client.get("/llmprof/api/traces").json()["ver"]
+    assert ver and ver in html  # page and API agree on the version
+
+
 def test_lifespan_runs(tmp_path):
     app = create_app(db_path=str(tmp_path / "l.db"), upstream="http://mock")
     # entering the context manager runs startup + shutdown (closes the client)

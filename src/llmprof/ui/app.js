@@ -31,6 +31,13 @@ let selectedSession = null;
 async function load() {
   const r = await fetch("/llmprof/api/traces?limit=100");
   const data = await r.json();
+  // self-heal a stale tab: if the proxy restarted with new UI assets, the JS in
+  // this tab is out of date and would render new server data with old code.
+  // Reload once to pick up the current bundle.
+  if (data.ver && window.__LLMPROF_VER && data.ver !== window.__LLMPROF_VER) {
+    location.reload();
+    return;
+  }
   TRACES = data.traces || [];
   const hosts = [...new Set(Object.values(data.upstreams || { x: data.upstream || "" })
     .map(u => (u || "").replace(/^https?:\/\//, "")).filter(Boolean))];

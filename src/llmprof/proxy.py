@@ -42,11 +42,18 @@ def _ver(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
 
 
+# one version for the whole UI bundle; the dashboard polls it and reloads itself
+# when it changes, so a long-lived tab can never run stale JS against a restarted
+# proxy (which silently broke renders when old UI met new server data).
+_ASSET_VER = _ver(_UI_JS + _UI_CSS)
+
+
 # bust the browser cache when the assets change, so a restarted proxy never
 # serves the dashboard against a stale app.js/app.css the browser cached.
 _UI_HTML = (
     _UI_HTML.replace("/llmprof/app.css", f"/llmprof/app.css?v={_ver(_UI_CSS)}")
     .replace("/llmprof/app.js", f"/llmprof/app.js?v={_ver(_UI_JS)}")
+    .replace("__ASSET_VER__", _ASSET_VER)
 )
 
 
@@ -115,7 +122,7 @@ def create_app(db_path: str | None = None, upstream: str | None = None,
 
     @app.get("/llmprof/api/traces")
     async def api_traces(limit: int = 100) -> dict:
-        return {"traces": app.state.store.recent(limit),
+        return {"traces": app.state.store.recent(limit), "ver": _ASSET_VER,
                 "upstream": app.state.upstreams["openai"], "upstreams": app.state.upstreams}
 
     @app.get("/llmprof/api/summary")
@@ -363,6 +370,18 @@ def _sse_objects(chunk: bytes):
 _SCRAPERS = {"chat": _scrape_openai, "messages": _scrape_anthropic, "responses": _scrape_responses}
 
 
+def _upstream_error(provider: str, upstream: str, exc: Exception) -> Response:
+    """A clean 502 when the upstream is unreachable, instead of a 500 stack trace.
+    The proxy must not crash-log when the network blips; the client gets a JSON
+    error it can surface or retry."""
+    _dbg(f"upstream {provider} unreachable ({upstream}): {exc}")
+    body = json.dumps({"error": {
+        "type": "upstream_unreachable",
+        "message": f"llmprof could not reach the {provider} upstream at {upstream}: {exc}",
+    }})
+    return Response(content=body, status_code=502, media_type="application/json")
+
+
 async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str, wire: str):
     body = await request.body()
     try:
@@ -383,7 +402,10 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str, 
 
     if payload.get("stream"):
         req = app.state.client.build_request("POST", url, content=body, headers=headers)
-        upstream = await app.state.client.send(req, stream=True)
+        try:
+            upstream = await app.state.client.send(req, stream=True)
+        except httpx.RequestError as exc:
+            return _upstream_error(provider, app.state.upstreams[provider], exc)
         status = upstream.status_code
         scrape = _SCRAPERS[wire]
         state = {"text": [], "fresh": None, "read": None, "write": None,
@@ -407,7 +429,10 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str, 
             media_type=upstream.headers.get("content-type", "text/event-stream"),
         )
 
-    upstream = await app.state.client.post(url, content=body, headers=headers)
+    try:
+        upstream = await app.state.client.post(url, content=body, headers=headers)
+    except httpx.RequestError as exc:
+        return _upstream_error(provider, app.state.upstreams[provider], exc)
     data = upstream.content
     usage = _usage_from_body(data, wire)
     called = _called_tools_from_body(data, wire)
@@ -458,7 +483,7 @@ def _record_blocking(app, provider, endpoint, model, payload, usage,
         breakdown["tree"], tokens.content_blocks(payload, provider),
         input_per_1k=eff, cached_tokens=read, cache_write=write,
         called_tools=called_tools, model=model or "gpt-4o",
-        prompt_tokens=prompt_total,
+        prompt_tokens=prompt_total, provider=provider,
     )
     app.state.store.record(
         {
