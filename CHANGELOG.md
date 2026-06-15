@@ -4,6 +4,20 @@ All notable changes to llmprof are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and llmprof follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-06-16
+
+### Fixed
+- **Monthly reclaimable projection no longer extrapolates a single burst to
+  24/7.** A dense session (for example 1500+ calls in a few hours) was scaled by
+  the observed span, projecting an entire month at the burst rate. The figure now
+  appears only once usage spans 2+ distinct calendar days and is averaged per
+  active day; a single day shows the trustworthy percent and absolute reclaimed
+  instead.
+- **The caching reclaim action no longer says "turn on prompt caching" when
+  caching is already in use.** It now counts cached vs uncached calls and, when
+  caching is active on some traffic, points at the specific calls that shipped an
+  uncached prefix.
+
 ## [0.1.0] - 2026-06-15
 
 Initial public release.
@@ -36,4 +50,5 @@ Initial public release.
   headless dashboard harness, so token and cost correctness is checked against
   real captured responses rather than by eye.
 
+[0.1.1]: https://github.com/luthraG/llmprof/releases/tag/v0.1.1
 [0.1.0]: https://github.com/luthraG/llmprof/releases/tag/v0.1.0
