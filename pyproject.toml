@@ -41,7 +41,8 @@ llmprof = "llmprof.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/llmprof"]
-artifacts = ["src/llmprof/ui/index.html", "src/llmprof/ui/app.css", "src/llmprof/ui/app.js"]
+artifacts = ["src/llmprof/ui/index.html", "src/llmprof/ui/app.css", "src/llmprof/ui/app.js",
+             "src/llmprof/data/model_prices.json"]
 
 [tool.ruff]
 line-length = 100

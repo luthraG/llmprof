@@ -80,7 +80,8 @@ Then open the dashboard, or `llmprof traces` for a terminal summary. Full docs:
 - **Context timeline** - how context grows turn over turn across an agent run.
 - **Cost leaderboard** - which prompt template (system prompt + tools) drives the
   bill, not just which model.
-- **Cost for 100+ models**, overridable via `LLMPROF_PRICING`.
+- **Cost for 1000+ models** from a bundled LiteLLM snapshot (offline, no fetch),
+  with curated rates for the newest flagships and `LLMPROF_PRICING` overrides.
 - **Runs local**, single SQLite file, with a pluggable backend for a shared
   database.
 

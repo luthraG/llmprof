@@ -147,13 +147,58 @@ PRICES: dict[str, tuple[float, float]] = {
     "command-a": (0.0025, 0.01),
 }
 
-# runtime table = defaults plus any user overrides
-_PRICES: dict[str, tuple[float, float]] = {k.lower(): v for k, v in PRICES.items()}
+# Three price tiers, highest precedence first. Curated (in-code) families are
+# authoritative for headline/newest models; the bundled LiteLLM snapshot
+# (src/llmprof/data/model_prices.json) adds broad coverage for everything else;
+# user overrides (register / LLMPROF_PRICING) win over both. Within a tier, an
+# exact id match wins, else the longest substring key.
+_CURATED: dict[str, tuple[float, float]] = {k.lower(): v for k, v in PRICES.items()}
+_OVERRIDES: dict[str, tuple[float, float]] = {}
+_BUNDLED: dict[str, tuple[float, float]] = {}
+_BUNDLED_CTX: dict[str, int] = {}
+
+# length-sorted key lists per tier, cached so a ~1000-key table is not re-sorted
+# on every call. Rebuilt whenever a tier's contents change.
+_SORTED: dict[str, list[str]] = {}
+
+
+def _resort(name: str, table: dict) -> None:
+    _SORTED[name] = sorted(table, key=len, reverse=True)
+
+
+def _load_bundled() -> None:
+    """Load the vendored LiteLLM snapshot (offline; no network). Best-effort: a
+    missing or malformed file just means less coverage, never an import error."""
+    try:
+        import importlib.resources as ir
+
+        raw = ir.files("llmprof").joinpath("data/model_prices.json").read_text("utf-8")
+        models = json.loads(raw).get("models", {})
+    except (OSError, ValueError, ModuleNotFoundError, AttributeError):
+        return
+    for key, spec in models.items():
+        try:
+            _BUNDLED[key.lower()] = (float(spec["in"]), float(spec["out"]))
+            if spec.get("ctx"):
+                _BUNDLED_CTX[key.lower()] = int(spec["ctx"])
+        except (KeyError, TypeError, ValueError):
+            continue
+
+
+def _match_tier(m: str, table: dict, keys) -> tuple[float, float] | None:
+    hit = table.get(m)            # exact id wins within the tier
+    if hit is not None:
+        return hit
+    for key in keys:              # else the longest substring key
+        if key in m:
+            return table[key]
+    return None
 
 
 def register(model_key: str, input_per_1k: float, output_per_1k: float) -> None:
-    """Add or override a model price at runtime."""
-    _PRICES[model_key.lower()] = (float(input_per_1k), float(output_per_1k))
+    """Add or override a model price at runtime (highest precedence)."""
+    _OVERRIDES[model_key.lower()] = (float(input_per_1k), float(output_per_1k))
+    _resort("overrides", _OVERRIDES)
 
 
 def load_overrides(path: str) -> int:
@@ -171,9 +216,10 @@ def _match(model: str | None) -> tuple[float, float] | None:
     if not model:
         return None
     m = model.lower()
-    for key in sorted(_PRICES, key=len, reverse=True):
-        if key in m:
-            return _PRICES[key]
+    for name, table in (("overrides", _OVERRIDES), ("curated", _CURATED), ("bundled", _BUNDLED)):
+        hit = _match_tier(m, table, _SORTED.get(name, ()))
+        if hit is not None:
+            return hit
     return None
 
 
@@ -234,13 +280,15 @@ def rates(model: str | None) -> tuple[float, float] | None:
 
 
 def context_window(model: str | None) -> int | None:
-    """The model's context window in tokens, or None if unknown."""
+    """The model's context window in tokens, or None if unknown. Curated windows
+    win; the bundled snapshot fills in the rest."""
     if not model:
         return None
     m = model.lower()
-    for key in sorted(CONTEXT_WINDOWS, key=len, reverse=True):
-        if key in m:
-            return CONTEXT_WINDOWS[key]
+    for name, table in (("ctx_curated", CONTEXT_WINDOWS), ("ctx_bundled", _BUNDLED_CTX)):
+        hit = _match_tier(m, table, _SORTED.get(name, ()))
+        if hit is not None:
+            return hit
     return None
 
 
@@ -310,7 +358,15 @@ def cost_cached(model: str | None, provider: str, fresh_input: int | None,
     return round(total, 6)
 
 
-# apply user overrides from the environment at import time
+# build the bundled tier and the per-tier sorted-key caches at import
+_load_bundled()
+_resort("overrides", _OVERRIDES)
+_resort("curated", _CURATED)
+_resort("bundled", _BUNDLED)
+_resort("ctx_curated", CONTEXT_WINDOWS)
+_resort("ctx_bundled", _BUNDLED_CTX)
+
+# apply user overrides from the environment at import time (re-sorts the overrides tier)
 _override_path = os.environ.get("LLMPROF_PRICING")
 if _override_path and os.path.exists(_override_path):
     try:
