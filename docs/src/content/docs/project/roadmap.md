@@ -18,13 +18,13 @@ description: What llmprof does today and what is coming next.
   [Installation](../../start/installation/#npx-no-python-needed).
 - **JavaScript / TypeScript SDK** - the same component-labeling API as Python.
   See the [JS/TS SDK](../../sdk/javascript/).
+- **Hosted live demo** - the real dashboard on a recorded session, no install.
+  [Try it in your browser](/llmprof/try/).
 
 ## Next
 
-- **README + demo GIF** - a 15-second above-the-fold demo of the flow.
 - **Postgres backend** - a shared/team dashboard on the existing store
   abstraction.
-- **Hosted live demo** - try it without installing anything.
 
 ## Not in scope
 
