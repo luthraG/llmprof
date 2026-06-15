@@ -67,7 +67,7 @@ def duplicate_tokens(texts: list[str], model: str = "gpt-4o") -> int:
 def analyze(tree: dict, texts: list[str] | None = None, *, input_per_1k: float | None = None,
             cached_tokens: int | None = None, cache_write: int | None = None,
             called_tools: list[str] | None = None, model: str = "gpt-4o",
-            prompt_tokens: int | None = None) -> dict:
+            prompt_tokens: int | None = None, provider: str | None = None) -> dict:
     """Return {findings, reclaimable_tokens, reclaimable_usd} for one request.
 
     Caching counts as active if the request had cache reads OR writes, so we do
@@ -130,13 +130,25 @@ def analyze(tree: dict, texts: list[str] | None = None, *, input_per_1k: float |
     prefix = comp.get("system prompt", 0) + ts
     cache_save = None
     if prefix >= 1024 and not caching_active:
-        cache_save = _usd(int(prefix * 0.9), input_per_1k)
-        findings.append(_finding(
-            "tip", "Stable prefix is not cached",
-            f"System prompt and tool schemas are {prefix:,} tokens that repeat every "
-            "call. Prompt caching can cut about 90% off them after the first call.",
-            save_usd=cache_save,
-        ))
+        # Anthropic caching is opt-in (cache_control), so an uncached prefix is a
+        # real, user-actionable saving. OpenAI/Gemini/DeepSeek cache repeated
+        # prefixes automatically, so there is nothing to "turn on" and no
+        # user-reclaimable dollars - it is informational only.
+        if provider in (None, "anthropic"):
+            cache_save = _usd(int(prefix * 0.9), input_per_1k)
+            findings.append(_finding(
+                "tip", "Stable prefix is not cached",
+                f"System prompt and tool schemas are {prefix:,} tokens that repeat every "
+                "call. Prompt caching can cut about 90% off them after the first call.",
+                save_usd=cache_save,
+            ))
+        else:
+            findings.append(_finding(
+                "tip", "Stable prefix not yet served from cache",
+                f"System prompt and tool schemas are {prefix:,} tokens that repeat every "
+                f"call. {provider} caches repeating prefixes automatically once they recur; "
+                "this call was not a cache hit yet.",
+            ))
 
     hist = comp.get("history (assistant)", 0) + comp.get("tool results", 0)
     if hist / total >= 0.4:

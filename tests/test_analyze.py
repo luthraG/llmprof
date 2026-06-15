@@ -54,6 +54,23 @@ def test_analyze_caching_tip_for_uncached_prefix():
     assert res["reclaimable_usd"] == tip["save_usd"]
 
 
+def test_caching_advice_is_provider_aware():
+    """Anthropic caching is opt-in, so an uncached prefix is user-reclaimable.
+    OpenAI auto-caches, so it is informational only (no 'turn it on', no dollars)."""
+    tree = _tree(system=1200, tools=(("a", 300),))
+    anthropic = analyze.analyze(tree, texts=[], input_per_1k=0.0025,
+                                cached_tokens=None, called_tools=["a"], provider="anthropic")
+    tip = next(f for f in anthropic["findings"] if "not cached" in f["title"])
+    assert tip["save_usd"] > 0 and anthropic["reclaimable_usd"] > 0
+
+    openai = analyze.analyze(tree, texts=[], input_per_1k=0.0025,
+                             cached_tokens=None, called_tools=["a"], provider="openai")
+    note = next(f for f in openai["findings"] if "prefix" in f["title"].lower())
+    assert note["save_usd"] is None  # OpenAI auto-caches; nothing to reclaim
+    assert openai["reclaimable_usd"] == 0.0
+    assert "automatically" in note["body"]
+
+
 def test_analyze_does_not_suggest_caching_when_already_caching():
     # a big stable prefix that WOULD trigger the caching tip if uncached...
     tree = _tree(system=1200, tools=(("a", 300),))

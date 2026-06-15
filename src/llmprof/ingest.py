@@ -112,7 +112,7 @@ def build_trace(model: str, provider: str, entries, called, usage: dict | None =
     ana = analyze.analyze(
         tree, [e[3] for e in entries], input_per_1k=eff,
         cached_tokens=cached, called_tools=called or None, model=model,
-        prompt_tokens=prompt,
+        prompt_tokens=prompt, provider=provider,
     )
     return {
         "ts": started if started is not None else time.time(),
