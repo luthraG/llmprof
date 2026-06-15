@@ -1,0 +1,45 @@
+<!doctype html>
+<!-- Intro scene for the demo animation (a terminal card). Matches the dashboard
+     palette; rasterized by record.py as the first frame. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #0b0c0f; --bg-1: #111319; --line: #222632;
+    --text: #e7ebf2; --muted: #98a1b3; --faint: #5b6475;
+    --accent: #7c84ff; --green: #3ddc97; --amber: #f7a13b;
+    --mono: ui-monospace, "DejaVu Sans Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1024px; height: 760px; }
+  body { background: var(--bg); display: flex; align-items: center; justify-content: center;
+         font-family: var(--mono); }
+  .term { width: 820px; background: var(--bg-1); border: 1px solid var(--line);
+          border-radius: 12px; box-shadow: 0 30px 70px rgba(0,0,0,0.5); overflow: hidden; }
+  .bar { display: flex; align-items: center; gap: 8px; padding: 13px 16px;
+         border-bottom: 1px solid var(--line); }
+  .bar i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  .r { background: #ff5f57; } .y { background: #febc2e; } .g { background: #28c840; }
+  .bar .ttl { margin-left: 8px; color: var(--faint); font-size: 14px; }
+  .body { padding: 26px 28px; font-size: 19px; line-height: 1.95; }
+  .p { color: var(--green); } .cmd { color: var(--text); font-weight: 700; }
+  .dim { color: var(--faint); } .acc { color: var(--accent); }
+  .amber { color: var(--amber); } .sp { display: block; height: 14px; }
+</style>
+</head>
+<body>
+  <div class="term">
+    <div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i>
+      <span class="ttl">llmprof - pprof for your LLM context</span></div>
+    <div class="body">
+      <div><span class="p">$</span> <span class="cmd">pipx install llmprof</span> <span class="dim"># or: npx llmprof</span></div>
+      <div><span class="p">$</span> <span class="cmd">llmprof up</span></div>
+      <div class="acc">llmprof is profiling on http://localhost:4000/v1</div>
+      <div class="dim">point your client's base_url at it. your key passes through.</div>
+      <span class="sp"></span>
+      <div class="amber">&#9650; open http://localhost:4000 - see where every token went</div>
+    </div>
+  </div>
+</body>
+</html>
