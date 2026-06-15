@@ -4,6 +4,13 @@ All notable changes to llmprof are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and llmprof follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-06-16
+
+### Fixed
+- **README images now render on PyPI.** The README referenced screenshots and the
+  demo with relative paths, which resolve on GitHub but not on the PyPI project
+  page (it showed a broken demo image). They now use absolute raw URLs.
+
 ## [0.1.1] - 2026-06-16
 
 ### Fixed
@@ -50,5 +57,6 @@ Initial public release.
   headless dashboard harness, so token and cost correctness is checked against
   real captured responses rather than by eye.
 
+[0.1.2]: https://github.com/luthraG/llmprof/releases/tag/v0.1.2
 [0.1.1]: https://github.com/luthraG/llmprof/releases/tag/v0.1.1
 [0.1.0]: https://github.com/luthraG/llmprof/releases/tag/v0.1.0

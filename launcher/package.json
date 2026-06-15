@@ -1,6 +1,6 @@
 {
   "name": "llmprof",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "pprof for your LLM context. Run the llmprof profiler with no Python install: npx llmprof up.",
   "bin": {
     "llmprof": "bin/cli.cjs"
