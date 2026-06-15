@@ -106,19 +106,23 @@ def create_app(db_path: str | None = None, upstream: str | None = None,
     async def health() -> dict:
         return {"ok": True, "upstreams": app.state.upstreams}
 
+    # never cache the dashboard or its assets. This is a local tool, so bandwidth
+    # is free, and it makes a stale tab impossible: every reload fetches the
+    # current bundle, no matter what the browser cached before.
+    _NO_STORE = {"cache-control": "no-store, max-age=0"}
+
     @app.get("/")
     @app.get("/llmprof")
     async def dashboard() -> Response:
-        # always revalidate the HTML so the browser picks up new asset versions
-        return HTMLResponse(_UI_HTML, headers={"cache-control": "no-cache"})
+        return HTMLResponse(_UI_HTML, headers=_NO_STORE)
 
     @app.get("/llmprof/app.css")
     async def app_css() -> Response:
-        return Response(_UI_CSS, media_type="text/css")
+        return Response(_UI_CSS, media_type="text/css", headers=_NO_STORE)
 
     @app.get("/llmprof/app.js")
     async def app_js() -> Response:
-        return Response(_UI_JS, media_type="application/javascript")
+        return Response(_UI_JS, media_type="application/javascript", headers=_NO_STORE)
 
     @app.get("/llmprof/api/traces")
     async def api_traces(limit: int = 100) -> dict:

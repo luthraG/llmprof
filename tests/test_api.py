@@ -65,6 +65,10 @@ def test_static_assets_served(tmp_path):
     assert ".empty-note" in css.text
     # the trends view is throttled so the 4s poll does not flash the panel
     assert "trendsSig" in js.text
+    # assets are never cached, so a reload can never run a stale bundle
+    assert "no-store" in js.headers.get("cache-control", "")
+    assert "no-store" in css.headers.get("cache-control", "")
+    assert "no-store" in client.get("/").headers.get("cache-control", "")
 
 
 def test_empty_breakdown_served(tmp_path):
