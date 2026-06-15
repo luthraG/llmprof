@@ -18,10 +18,10 @@
 </p>
 
 <p align="center">
-  <a href="https://luthrag.github.io/llmprof/try/"><img src="assets/demo.webp" alt="llmprof: point your base_url at the proxy and see a flame graph of where every token went, plus the dollars you can reclaim" width="920"></a>
+  <a href="https://luthrag.github.io/llmprof/try/"><img src="https://raw.githubusercontent.com/luthraG/llmprof/main/assets/demo.webp" alt="llmprof: point your base_url at the proxy and see a flame graph of where every token went, plus the dollars you can reclaim" width="920"></a>
 </p>
 <p align="center">
-  <sub>lossless animation; a <a href="assets/demo.gif">GIF version</a> is also available &middot; <a href="https://luthrag.github.io/llmprof/try/">open the interactive demo</a></sub>
+  <sub>lossless animation; a <a href="https://raw.githubusercontent.com/luthraG/llmprof/main/assets/demo.gif">GIF version</a> is also available &middot; <a href="https://luthrag.github.io/llmprof/try/">open the interactive demo</a></sub>
 </p>
 
 You profile CPU and memory. Why fly blind on the most expensive resource in your
@@ -48,17 +48,17 @@ straight through) and open `http://localhost:4000`.
 A flame graph of one request's tokens, with the optimization findings and the
 dollars you can reclaim on the call:
 
-![Context flame graph with per-tool drill-down, optimization findings, and a reclaimable-cost strip](assets/flame-graph.png)
+![Context flame graph with per-tool drill-down, optimization findings, and a reclaimable-cost strip](https://raw.githubusercontent.com/luthraG/llmprof/main/assets/flame-graph.png)
 
 The headline number across all your calls, projected to a month, plus day-over-day
 trends and a most-expensive-prompts leaderboard:
 
-![Trends view with a reclaimable-per-month banner, today vs yesterday cards, a cost-per-day chart, and a by-model breakdown](assets/trends.png)
+![Trends view with a reclaimable-per-month banner, today vs yesterday cards, a cost-per-day chart, and a by-model breakdown](https://raw.githubusercontent.com/luthraG/llmprof/main/assets/trends.png)
 
 Context creep across an agent's turns - history balloons while the system prompt
 and tools stay flat:
 
-![Context timeline showing prompt tokens per turn growing across a run](assets/timeline.png)
+![Context timeline showing prompt tokens per turn growing across a run](https://raw.githubusercontent.com/luthraG/llmprof/main/assets/timeline.png)
 
 ## Quickstart
 
