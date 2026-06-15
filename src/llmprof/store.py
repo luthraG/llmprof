@@ -335,11 +335,13 @@ class SQLiteStore(BaseStore):
             out.append(d)
         return out
 
-    # a monthly projection is only meaningful with enough spread-out data;
-    # below this we show the scale-invariant numbers instead of extrapolating
-    # a short burst to 24/7 (which produced absurd, wildly swinging figures).
+    # a monthly projection is only meaningful with enough spread-out data; below
+    # this we show the scale-invariant numbers instead. We require usage across
+    # 2+ distinct calendar days and average per active day, rather than
+    # extrapolating one dense burst's rate to 24/7 (which produced absurd,
+    # wildly swinging figures like a 14h session projected to a full month).
     _PROJECT_MIN_CALLS = 50
-    _PROJECT_MIN_SPAN_S = 12 * 3600  # 12 hours
+    _PROJECT_MIN_DAYS = 2
     # "never used" is only a trustworthy reclaimable signal once we have seen the
     # toolset exercised across enough calls; below this we do not claim it.
     _DEAD_TOOL_MIN_CALLS = 20
@@ -365,8 +367,13 @@ class SQLiteStore(BaseStore):
         cost = sum(r["cost_usd"] or 0.0 for r in rows)
         ts_vals = [r["ts"] for r in rows if r["ts"] is not None]
         span_s = max((max(ts_vals) - min(ts_vals)) if ts_vals else 0, 0)
+        # distinct UTC calendar days the calls fall on; a single dense session is
+        # one day no matter how many hours it ran, and is not projectable.
+        active_days = len({time.gmtime(t)[:3] for t in ts_vals})
 
         dup_usd = cache_usd = 0.0
+        cached_calls = 0          # calls where prompt caching was active (read or write)
+        uncached_prefix_calls = 0  # calls that shipped a stable prefix uncached
         shipped: dict[str, int] = {}   # tool -> representative schema tokens
         ever_called: set[str] = set()
         per_call: list[tuple[float, dict]] = []  # (effective rate, this call's tool tokens)
@@ -377,6 +384,8 @@ class SQLiteStore(BaseStore):
             for name, tok in tool_map.items():
                 shipped[name] = max(shipped.get(name, 0), tok)
             per_call.append((_effective_rate(r), tool_map))
+            if (r["cached_tokens"] or 0) > 0 or (r["cache_write_tokens"] or 0) > 0:
+                cached_calls += 1
             ana = json.loads(r["analysis"]) if r["analysis"] else {}
             for f in ana.get("findings", []):
                 title = f.get("title", "")
@@ -384,6 +393,7 @@ class SQLiteStore(BaseStore):
                     dup_usd += f.get("save_usd") or 0.0
                 elif "Stable prefix is not cached" in title:
                     cache_usd += f.get("save_usd") or 0.0
+                    uncached_prefix_calls += 1
 
         dead = {n for n in shipped if n not in ever_called}
         dead_gated = calls >= self._DEAD_TOOL_MIN_CALLS
@@ -394,27 +404,32 @@ class SQLiteStore(BaseStore):
                 dead_usd += dead_tok / 1000 * rate
 
         reclaimable = dup_usd + cache_usd + dead_usd
-        projectable = calls >= self._PROJECT_MIN_CALLS and span_s >= self._PROJECT_MIN_SPAN_S
+        projectable = calls >= self._PROJECT_MIN_CALLS and active_days >= self._PROJECT_MIN_DAYS
         out = {
             "calls": calls,
             "reclaimable_usd": round(reclaimable, 6),
             "cost_usd": round(cost, 6),
             "pct": round(reclaimable / cost * 100, 1) if cost else 0,
             "span_seconds": int(span_s),
+            "active_days": active_days,
             "projectable": projectable,
             "monthly_reclaimable_usd": None,
             "monthly_calls": None,
             "unused_tools_pending": len(dead) if (dead and not dead_gated) else 0,
-            "actions": self._reclaim_actions(dead_usd, dead, calls, dup_usd, cache_usd),
+            "actions": self._reclaim_actions(
+                dead_usd, dead, calls, dup_usd, cache_usd,
+                cached_calls, uncached_prefix_calls),
         }
         if projectable:
-            days = span_s / 86400
-            out["monthly_reclaimable_usd"] = round(reclaimable / days * 30, 2)
-            out["monthly_calls"] = int(calls / days * 30)
+            # average per active day, then scale to a 30-day month; this is "if
+            # every day looked like the days we observed", not "if you ran 24/7".
+            out["monthly_reclaimable_usd"] = round(reclaimable / active_days * 30, 2)
+            out["monthly_calls"] = int(calls / active_days * 30)
         return out
 
     @staticmethod
-    def _reclaim_actions(dead_usd, dead, calls, dup_usd, cache_usd) -> list[dict]:
+    def _reclaim_actions(dead_usd, dead, calls, dup_usd, cache_usd,
+                         cached_calls=0, uncached_prefix_calls=0) -> list[dict]:
         """The concrete fixes behind the reclaimable number, ranked by dollars."""
         actions = []
         if dead_usd > 0:
@@ -426,8 +441,15 @@ class SQLiteStore(BaseStore):
                 "action": "Dedupe repeated context, instructions, or retrieved chunks.",
                 "calls": calls, "save_usd": round(dup_usd, 6)})
         if cache_usd > 0:
+            # If caching is already active on some traffic, "turn on prompt
+            # caching" is misleading; point at the specific calls that missed it.
+            if cached_calls > 0:
+                text = (f"Cache the stable prefix on {uncached_prefix_calls} of {calls} "
+                        "calls that shipped it uncached.")
+            else:
+                text = "Turn on prompt caching for your stable system + tools prefix."
             actions.append({
-                "action": "Turn on prompt caching for your stable system + tools prefix.",
+                "action": text,
                 "calls": calls, "save_usd": round(cache_usd, 6)})
         return sorted(actions, key=lambda a: a["save_usd"], reverse=True)
 

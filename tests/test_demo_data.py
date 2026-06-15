@@ -78,7 +78,7 @@ def test_demo_tells_the_waste_story():
     # the headline reclaimable signals: dead tools, dedupe, and caching
     assert "never used" in actions          # tools shipped but never called
     assert "Dedupe" in actions              # duplicated content
-    assert "caching" in actions             # uncached stable prefix
+    assert "prefix" in actions              # uncached stable prefix (cache it / turn caching on)
 
 
 def test_sessions_present_for_timeline():

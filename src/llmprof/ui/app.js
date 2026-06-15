@@ -144,7 +144,7 @@ async function renderTrends(force) {
       `<div class="rb-main"><div class="rb-label">reclaimable</div>`+
       `<div class="rb-val">~${rec.pct}% of spend</div></div>`+
       `<div class="rb-meta"><span>${money(rec.reclaimable_usd)} across ${fmt(rec.calls)} calls so far</span>`+
-      `<span>capture ~a day of usage for a /mo estimate</span></div></div>${actionList}</div>`;
+      `<span>capture a couple of days of usage for a /mo estimate</span></div></div>${actionList}</div>`;
   } else if (rec.calls > 0) {
     // honest lean state: nothing obvious to reclaim (well cached, no dead weight)
     const pending = rec.unused_tools_pending

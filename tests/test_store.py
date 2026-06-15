@@ -68,28 +68,42 @@ def _dup_trace(ts, save_usd=0.02, cost=0.05):
 
 
 def test_reclaimable_projection_is_gated(tmp_path):
-    """A short burst must not be extrapolated to a month; percent + absolute are
-    always shown, the /mo figure only once there is enough spread-out data."""
-    import time
+    """A single dense session, however many calls, must not be extrapolated to a
+    month; the /mo figure only appears across 2+ distinct days and is averaged per
+    active day. Percent + absolute are always shown."""
+    base = 1_700_000_000  # fixed epoch so UTC-day bucketing is deterministic
 
+    # a tiny burst: 5 calls in under two minutes -> not projectable
     st = SQLiteStore(str(tmp_path / "rec.db"))
-    now = time.time()
-
-    # a tiny burst: 5 calls in 2 minutes -> not projectable
     for i in range(5):
-        st.record(_dup_trace(now - 120 + i * 20))
+        st.record(_dup_trace(base + i * 20))
     burst = st.reclaimable_summary()
     assert burst["projectable"] is False
     assert burst["monthly_reclaimable_usd"] is None
     assert burst["pct"] > 0 and burst["reclaimable_usd"] > 0  # still trustworthy
 
-    # plenty of calls across more than half a day -> projectable
-    st2 = SQLiteStore(str(tmp_path / "rec2.db"))
+    # 60 calls but all on a SINGLE day -> still not projectable (the screenshot case)
+    one_day = SQLiteStore(str(tmp_path / "oneday.db"))
     for i in range(60):
-        st2.record(_dup_trace(now - 14 * 3600 + i * 800))
-    big = st2.reclaimable_summary()
+        one_day.record(_dup_trace(base + i * 60))  # spans ~1h, one calendar day
+    od = one_day.reclaimable_summary()
+    assert od["active_days"] == 1
+    assert od["projectable"] is False
+    assert od["monthly_reclaimable_usd"] is None
+    assert od["pct"] > 0  # the trustworthy numbers are still there
+
+    # 60 calls across 2 distinct days -> projectable, averaged per active day
+    two_day = SQLiteStore(str(tmp_path / "twoday.db"))
+    for i in range(30):
+        two_day.record(_dup_trace(base + i * 60))            # day 1
+    for i in range(30):
+        two_day.record(_dup_trace(base + 86400 + i * 60))    # day 2
+    big = two_day.reclaimable_summary()
+    assert big["active_days"] == 2
     assert big["projectable"] is True
-    assert big["monthly_reclaimable_usd"] is not None and big["monthly_calls"] > 0
+    # reclaimable = 60 * 0.02 = 1.20; per active day * 30 = 1.20 / 2 * 30 = 18.00
+    assert big["monthly_reclaimable_usd"] == 18.0
+    assert big["monthly_calls"] == 900
 
 
 def _tool_trace(ts, shipped, called, *, cost=0.05, cached=0, prompt=20000):
@@ -148,6 +162,45 @@ def test_reclaimable_ranks_dead_tools_dupes_and_caching(tmp_path):
     assert actions[0]["action"].startswith("Dedupe")  # $1.50 * 22 dominates
     assert any("never used" in a["action"] for a in actions)
     assert all("caching is active" not in a["action"] for a in actions)
+
+
+def _prefix_trace(ts, *, cached, save_usd=0.0):
+    """A trace whose stable prefix is either served from cache, or flagged uncached."""
+    if cached:
+        findings = [{"severity": "ok", "title": "Prompt caching is active"}]
+    else:
+        findings = [{"severity": "tip", "title": "Stable prefix is not cached",
+                     "save_usd": save_usd}]
+    return {"ts": ts, "provider": "anthropic", "model": "claude-opus-4-8",
+            "prompt_tokens": 20000, "completion_tokens": 10, "total_tokens": 20010,
+            "cost_usd": 0.05, "cached_tokens": 5000 if cached else 0,
+            "analysis": {"findings": findings}}
+
+
+def test_caching_action_reflects_existing_caching(tmp_path):
+    """If caching is already active on some traffic, the action must point at the
+    calls that missed cache, not tell the user to 'turn on prompt caching'."""
+    base = 1_700_000_000
+
+    # mostly cached, a few calls shipped an uncached prefix
+    mixed = SQLiteStore(str(tmp_path / "mixed.db"))
+    for i in range(5):
+        mixed.record(_prefix_trace(base + i, cached=True))
+    for i in range(3):
+        mixed.record(_prefix_trace(base + 100 + i, cached=False, save_usd=0.10))
+    acts = mixed.reclaimable_summary()["actions"]
+    cache_act = next(a for a in acts if "cache" in a["action"].lower())
+    assert cache_act["action"] == (
+        "Cache the stable prefix on 3 of 8 calls that shipped it uncached.")
+    assert not cache_act["action"].startswith("Turn on")
+
+    # no caching anywhere -> the original call-to-action stands
+    none = SQLiteStore(str(tmp_path / "none.db"))
+    for i in range(4):
+        none.record(_prefix_trace(base + i, cached=False, save_usd=0.10))
+    acts2 = none.reclaimable_summary()["actions"]
+    assert acts2[0]["action"] == (
+        "Turn on prompt caching for your stable system + tools prefix.")
 
 
 def test_session_groups_despite_mutated_middle_context(tmp_path):
