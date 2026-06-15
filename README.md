@@ -9,14 +9,19 @@
   <img src="https://img.shields.io/badge/python-3.9%2B-blue" alt="Python 3.9+">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   <a href="https://luthrag.github.io/llmprof"><img src="https://img.shields.io/badge/docs-online-7c84ff" alt="Docs"></a>
+  <a href="https://luthrag.github.io/llmprof/try/"><img src="https://img.shields.io/badge/live_demo-try_in_browser-3ddc97" alt="Live demo"></a>
   <img src="https://img.shields.io/badge/100%25_local-prompts_never_leave_your_machine-3ddc97" alt="100% local">
 </p>
 
 <p align="center">
-  <img src="assets/demo.webp" alt="llmprof: point your base_url at the proxy and see a flame graph of where every token went, plus the dollars you can reclaim" width="920">
+  <b>&#9654; <a href="https://luthrag.github.io/llmprof/try/">Try the live dashboard in your browser</a></b> - no install, a real recorded session.
+</p>
+
+<p align="center">
+  <a href="https://luthrag.github.io/llmprof/try/"><img src="assets/demo.webp" alt="llmprof: point your base_url at the proxy and see a flame graph of where every token went, plus the dollars you can reclaim" width="920"></a>
 </p>
 <p align="center">
-  <sub>lossless animation; a <a href="assets/demo.gif">GIF version</a> is also available</sub>
+  <sub>lossless animation; a <a href="assets/demo.gif">GIF version</a> is also available &middot; <a href="https://luthrag.github.io/llmprof/try/">open the interactive demo</a></sub>
 </p>
 
 You profile CPU and memory. Why fly blind on the most expensive resource in your

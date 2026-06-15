@@ -7,10 +7,14 @@ hero:
   image:
     file: ../../assets/logo.svg
   actions:
+    - text: Try the live demo
+      link: ./try/
+      icon: right-arrow
+      variant: primary
     - text: Quickstart
       link: ./start/quickstart/
       icon: right-arrow
-      variant: primary
+      variant: secondary
     - text: View on GitHub
       link: https://github.com/luthraG/llmprof
       icon: external
@@ -29,7 +33,9 @@ llmprof is a local, zero-config profiler for LLM calls. Point your client's
 straight through), and on the way it breaks each request's prompt tokens into the
 components that make it up, prices the call, and flags what is wasteful.
 
-<Image src={flame} alt="llmprof dashboard showing a context flame graph, optimization findings, and reclaimable cost for a single call" />
+<a href="./try/"><Image src={flame} alt="llmprof dashboard showing a context flame graph, optimization findings, and reclaimable cost for a single call" /></a>
+
+<p style="text-align:center; margin-top:-0.5rem;"><a href="./try/"><strong>Open the interactive demo &rarr;</strong></a> - the real dashboard on a recorded session, no install.</p>
 
 ## What you get
 
