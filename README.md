@@ -155,7 +155,9 @@ ruff check . && pytest
 ```
 
 The dashboard is dependency-light vanilla JS/SVG; docs live in `docs/` (Astro
-Starlight). See [Contributing](https://luthrag.github.io/llmprof/project/contributing/).
+Starlight). See [Contributing](https://luthrag.github.io/llmprof/project/contributing/)
+and the [changelog](CHANGELOG.md). Runnable [examples](examples/) cover both
+providers and both SDKs.
 
 ## License
 

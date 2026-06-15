@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "llmprof"
-version = "0.0.1"
+version = "0.1.0"
 description = "pprof for your LLM context - see where every token and dollar goes."
 readme = "README.md"
 requires-python = ">=3.9"

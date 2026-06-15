@@ -1,6 +1,6 @@
 {
   "name": "@llmprof/sdk",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "JavaScript/TypeScript SDK for llmprof - label your LLM context components (RAG, tools, history) for precise token attribution.",
   "type": "module",
   "main": "index.js",
