@@ -62,6 +62,21 @@ def test_analyze_does_not_suggest_caching_when_already_caching():
     assert any("caching is active" in t for t in titles)
 
 
+def test_caching_pct_never_exceeds_100():
+    """cached tokens come from real usage; the component tree is a tiktoken
+    estimate and can undershoot. The 'served from cache' percent must use the
+    real prompt total and cap at 100, not print 117%."""
+    tree = _tree(system=600, tools=(("a", 200),))  # component sum ~800
+    res = analyze.analyze(tree, texts=[], input_per_1k=0.0025,
+                          cached_tokens=65887, prompt_tokens=65959)
+    body = next(f["body"] for f in res["findings"] if "served from cache" in f["body"])
+    assert "100% of the prompt" in body  # 65887/65959 -> ~100, not /800 -> 8000%
+    # falls back to the component sum when the real prompt total is absent, still capped
+    res2 = analyze.analyze(tree, texts=[], input_per_1k=0.0025, cached_tokens=65887)
+    body2 = next(f["body"] for f in res2["findings"] if "served from cache" in f["body"])
+    assert "100% of the prompt" in body2
+
+
 def test_analyze_clean_context():
     tree = {"name": "context", "tokens": 120,
             "children": [{"name": "system prompt", "tokens": 60, "children": []},

@@ -51,7 +51,14 @@ _UI_HTML = (
 
 
 def _forward_headers(request: Request) -> dict[str, str]:
-    return {k: v for k, v in request.headers.items() if k.lower() not in _SKIP_HEADERS}
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in _SKIP_HEADERS}
+    # Force an uncompressed upstream response. Otherwise httpx adds its own
+    # Accept-Encoding and the server gzips the stream; the streaming path reads
+    # raw (still-compressed) bytes, so the SSE scraper cannot see usage - cached
+    # reads then look like fresh input and the call is mispriced ~10x. Setting
+    # identity keeps the scraper working and the bytes we forward stay valid.
+    headers["accept-encoding"] = "identity"
+    return headers
 
 
 def _dbg(msg: str) -> None:
@@ -450,6 +457,7 @@ def _record_blocking(app, provider, endpoint, model, payload, usage,
         breakdown["tree"], tokens.content_blocks(payload, provider),
         input_per_1k=eff, cached_tokens=read, cache_write=write,
         called_tools=called_tools, model=model or "gpt-4o",
+        prompt_tokens=prompt_total,
     )
     app.state.store.record(
         {

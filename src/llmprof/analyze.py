@@ -66,7 +66,8 @@ def duplicate_tokens(texts: list[str], model: str = "gpt-4o") -> int:
 
 def analyze(tree: dict, texts: list[str] | None = None, *, input_per_1k: float | None = None,
             cached_tokens: int | None = None, cache_write: int | None = None,
-            called_tools: list[str] | None = None, model: str = "gpt-4o") -> dict:
+            called_tools: list[str] | None = None, model: str = "gpt-4o",
+            prompt_tokens: int | None = None) -> dict:
     """Return {findings, reclaimable_tokens, reclaimable_usd} for one request.
 
     Caching counts as active if the request had cache reads OR writes, so we do
@@ -114,7 +115,10 @@ def analyze(tree: dict, texts: list[str] | None = None, *, input_per_1k: float |
     if caching_active:
         served = cached_tokens or 0
         if served:
-            pct = served / (sum(comp.values()) or 1) * 100
+            # the real billed prompt is the right denominator; the component tree
+            # is a tiktoken estimate and can undershoot, which printed >100%.
+            denom = prompt_tokens or sum(comp.values()) or 1
+            pct = min(served / denom * 100, 100)
             body = f"{served:,} tokens ({pct:.0f}% of the prompt) were served from cache."
         else:
             body = "the stable prefix is being written to cache on this call."

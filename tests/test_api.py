@@ -321,6 +321,25 @@ def test_passthrough_proxies_other_paths(tmp_path):
     assert r.json()["data"] == ["gpt-4o", "gpt-4o-mini"]
 
 
+def test_upstream_request_forces_identity_encoding(tmp_path):
+    """The upstream must not gzip its response: the streaming path reads raw
+    bytes, and a compressed SSE stream is unparseable, so cache-read tokens are
+    lost and cached calls get mispriced ~10x. We force accept-encoding: identity."""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["accept-encoding"] = request.headers.get("accept-encoding")
+        seen["host"] = request.headers.get("host")
+        return httpx.Response(200, json={"usage": {"prompt_tokens": 5, "completion_tokens": 1}})
+
+    app = create_app(db_path=str(tmp_path / "h.db"), upstream="http://mock")
+    app.state.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = TestClient(app)
+    client.post("/v1/chat/completions", json={"model": "gpt-4o",
+                "messages": [{"role": "user", "content": "hi"}]})
+    assert seen["accept-encoding"] == "identity"
+
+
 def test_lifespan_runs(tmp_path):
     app = create_app(db_path=str(tmp_path / "l.db"), upstream="http://mock")
     # entering the context manager runs startup + shutdown (closes the client)
