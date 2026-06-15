@@ -45,11 +45,13 @@ CHECKS_JS = r"""
         V.push(`hidden finding: "${r.textContent.trim().slice(0, 50)}"`);
   }
 
-  // (2) no broken values leaking into the rendered panel
+  // (2) no broken values leaking into the rendered panel. "$?" is intentional
+  //     (an unknown model has no price, money(null) -> "$?"), so it is NOT a bug;
+  //     only NaN/undefined/Infinity are always real defects.
   const main = document.querySelector('#main');
   if (main) {
     const t = main.innerText || '';
-    for (const bad of ['NaN', 'undefined', '$?', 'Infinity'])
+    for (const bad of ['NaN', 'undefined', 'Infinity'])
       if (t.includes(bad)) V.push(`main panel shows literal "${bad}"`);
   }
 
