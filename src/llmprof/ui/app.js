@@ -95,7 +95,9 @@ async function renderTrends(force) {
       `<div class="rbar"><i style="width:${w}%"></i></div>`+
       `<div class="rmeta">${r.calls}&times; &middot; ${fmt(Math.round(r.avg_tokens))} tok/call avg &middot; ${esc(r.model || '')}</div></div>`;
   }).join("");
-  const routePanel = routes.length
+  // a leaderboard needs at least two prompt templates to compare; with a single
+  // agent it collapses to one meaningless row, so hide it until there are 2+.
+  const routePanel = routes.length >= 2
     ? `<div class="panel"><div class="panel-title"><span>most expensive prompts</span><span class="pill">${routes.length}</span></div>`+
       `<div class="routes">${routeRows}</div></div>`
     : "";
@@ -104,9 +106,9 @@ async function renderTrends(force) {
   // the ranked fixes aggregated from the per-call findings.
   const actionRows = (rec.actions || []).map(a => {
     const dollars = a.save_usd ? ` &middot; <b class="save">~${money(a.save_usd)}</b>` : "";
-    const toks = a.tokens ? ` &middot; ${fmt(a.tokens)} tok` : "";
+    const nc = a.calls === 1 ? "1 call" : `${fmt(a.calls)} calls`;
     return `<li class="rb-act"><span class="rb-act-do">${esc(a.action)}</span>`+
-      `<span class="rb-act-meta">${fmt(a.calls)} calls${toks}${dollars}</span></li>`;
+      `<span class="rb-act-meta">${nc}${dollars}</span></li>`;
   }).join("");
   const actionList = actionRows
     ? `<div class="rb-actions"><div class="rb-actions-h">how to reclaim it</div>`+
@@ -127,6 +129,15 @@ async function renderTrends(force) {
       `<div class="rb-val">~${rec.pct}% of spend</div></div>`+
       `<div class="rb-meta"><span>${money(rec.reclaimable_usd)} across ${fmt(rec.calls)} calls so far</span>`+
       `<span>capture ~a day of usage for a /mo estimate</span></div></div>${actionList}</div>`;
+  } else if (rec.calls > 0) {
+    // honest lean state: nothing obvious to reclaim (well cached, no dead weight)
+    const pending = rec.unused_tools_pending
+      ? `<span>${rec.unused_tools_pending} tools look unused; capture more calls to confirm</span>`
+      : `<span>well cached, no duplicate or dead-tool waste</span>`;
+    recBanner = `<div class="reclaim-banner lean"><div class="rb-top"><span class="rb-ic">${flameIcon}</span>`+
+      `<div class="rb-main"><div class="rb-label">reclaimable</div>`+
+      `<div class="rb-val">context looks lean</div></div>`+
+      `<div class="rb-meta">${pending}<span>${fmt(rec.calls)} calls analyzed</span></div></div></div>`;
   }
   main.innerHTML =
     `<div class="detail-head"><div class="dh-title"><h1>Trends</h1>`+

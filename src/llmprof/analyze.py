@@ -98,11 +98,14 @@ def analyze(tree: dict, texts: list[str] | None = None, *, input_per_1k: float |
             wasted = sum(c.get("tokens", 0) for c in unused)
             names = ", ".join(c["name"] for c in unused[:6]) + (", ..." if len(unused) > 6 else "")
             ntools = len(ts_node.get("children") or [])
+            # Informational only: not calling a tool on ONE request does not make
+            # its schema reclaimable, an agent needs the full toolset across the
+            # run. Tools never used across the whole window are the reclaimable
+            # signal, and that is computed in store.reclaimable_summary().
             findings.append(_finding(
-                "warn", f"{len(unused)} of {ntools} tools were not called",
-                f"{names}: {wasted:,} tokens of schemas the model never used on this "
-                "request. Drop tools it does not need here, or load them lazily.",
-                reclaimable_tokens=wasted, save_usd=_usd(wasted, input_per_1k),
+                "warn", f"{len(unused)} of {ntools} tools were not called on this request",
+                f"{names}: {wasted:,} tokens of schemas unused on this request. If your "
+                "app over-ships tools, llmprof flags ones never used across the run.",
             ))
 
     if ts / total >= 0.35:
@@ -125,13 +128,14 @@ def analyze(tree: dict, texts: list[str] | None = None, *, input_per_1k: float |
         findings.append(_finding("ok", "Prompt caching is active", body))
 
     prefix = comp.get("system prompt", 0) + ts
+    cache_save = None
     if prefix >= 1024 and not caching_active:
-        save = _usd(int(prefix * 0.9), input_per_1k)
+        cache_save = _usd(int(prefix * 0.9), input_per_1k)
         findings.append(_finding(
             "tip", "Stable prefix is not cached",
             f"System prompt and tool schemas are {prefix:,} tokens that repeat every "
             "call. Prompt caching can cut about 90% off them after the first call.",
-            save_usd=save,
+            save_usd=cache_save,
         ))
 
     hist = comp.get("history (assistant)", 0) + comp.get("tool results", 0)
@@ -151,15 +155,15 @@ def analyze(tree: dict, texts: list[str] | None = None, *, input_per_1k: float |
     if not any(f["severity"] != "ok" for f in findings):
         findings.append(_finding("ok", "No obvious waste detected", "This context looks lean."))
 
-    # The headline reclaimable is REMOVABLE tokens only (duplicates + unused tool
-    # schemas), priced once. We deliberately do NOT add the caching tip's saving:
-    # it overlaps with the prefix those tokens belong to (double counting), and it
-    # is a recurring cache-hit saving, not tokens you drop. The caching tip still
-    # shows its own per-call estimate inline.
+    # Per-call reclaimable is what is genuinely reclaimable on THIS call:
+    # removable duplicate tokens, plus the recurring saving from caching an
+    # uncached stable prefix. Per-call "unused tools" is NOT counted: an agent
+    # needs its full toolset across the run, so tools never used across the whole
+    # window (computed in store.reclaimable_summary) are the reclaimable signal.
     reclaimable_tokens = sum(f["reclaimable_tokens"] for f in findings)
-    reclaimable_usd = _usd(reclaimable_tokens, input_per_1k) or 0.0
+    reclaimable_usd = (_usd(reclaimable_tokens, input_per_1k) or 0.0) + (cache_save or 0.0)
     return {
         "findings": findings,
         "reclaimable_tokens": reclaimable_tokens,
-        "reclaimable_usd": reclaimable_usd,
+        "reclaimable_usd": round(reclaimable_usd, 6),
     }

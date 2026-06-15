@@ -38,6 +38,15 @@ def test_env_url_overrides_db_path(tmp_path, monkeypatch):
     assert s.path == str(env_db)
 
 
+def _dup_trace(ts, save_usd=0.02, cost=0.05):
+    """A trace whose only waste is duplicated content worth `save_usd`."""
+    return {"ts": ts, "provider": "openai", "model": "gpt-4o", "prompt_tokens": 1000,
+            "completion_tokens": 50, "total_tokens": 1050, "cost_usd": cost,
+            "analysis": {"findings": [{"severity": "warn",
+                                       "title": "Duplicated content in the context",
+                                       "reclaimable_tokens": 400, "save_usd": save_usd}]}}
+
+
 def test_reclaimable_projection_is_gated(tmp_path):
     """A short burst must not be extrapolated to a month; percent + absolute are
     always shown, the /mo figure only once there is enough spread-out data."""
@@ -48,9 +57,7 @@ def test_reclaimable_projection_is_gated(tmp_path):
 
     # a tiny burst: 5 calls in 2 minutes -> not projectable
     for i in range(5):
-        st.record({"ts": now - 120 + i * 20, "provider": "anthropic", "model": "claude-opus-4-8",
-                   "prompt_tokens": 1000, "completion_tokens": 50, "total_tokens": 1050,
-                   "cost_usd": 0.05, "reclaimable_usd": 0.02})
+        st.record(_dup_trace(now - 120 + i * 20))
     burst = st.reclaimable_summary()
     assert burst["projectable"] is False
     assert burst["monthly_reclaimable_usd"] is None
@@ -59,39 +66,67 @@ def test_reclaimable_projection_is_gated(tmp_path):
     # plenty of calls across more than half a day -> projectable
     st2 = SQLiteStore(str(tmp_path / "rec2.db"))
     for i in range(60):
-        st2.record({"ts": now - 14 * 3600 + i * 800, "provider": "openai", "model": "gpt-4o",
-                    "prompt_tokens": 1000, "completion_tokens": 50, "total_tokens": 1050,
-                    "cost_usd": 0.05, "reclaimable_usd": 0.02})
+        st2.record(_dup_trace(now - 14 * 3600 + i * 800))
     big = st2.reclaimable_summary()
     assert big["projectable"] is True
     assert big["monthly_reclaimable_usd"] is not None and big["monthly_calls"] > 0
 
 
-def test_reclaimable_summary_ranks_actionable_fixes(tmp_path):
-    """The headline reclaimable number comes with a ranked how-to, aggregated
-    from the per-call findings, sorted by dollars saved."""
-    st = SQLiteStore(str(tmp_path / "act.db"))
-    base = {"provider": "anthropic", "model": "claude-opus-4-8", "prompt_tokens": 1000,
-            "completion_tokens": 10, "total_tokens": 1010, "cost_usd": 0.05}
-    # unused tool schemas: cheap per call but on every call
-    for _ in range(5):
-        st.record({**base, "reclaimable_usd": 0.01, "analysis": {"findings": [
-            {"severity": "warn", "title": "3 of 12 tools were not called",
-             "reclaimable_tokens": 200, "save_usd": 0.01}]}})
-    # one big duplicate-content finding worth more dollars
-    st.record({**base, "reclaimable_usd": 0.30, "analysis": {"findings": [
-        {"severity": "warn", "title": "Duplicated content in the context",
-         "reclaimable_tokens": 5000, "save_usd": 0.30},
-        {"severity": "ok", "title": "Prompt caching is active"}]}})
+def _tool_trace(ts, shipped, called, *, cost=0.05, cached=0, prompt=20000):
+    """A trace shipping `shipped` tool schemas (name -> tokens), calling `called`."""
+    children = [{"name": n, "tokens": t, "children": []} for n, t in shipped.items()]
+    detail = {"name": "context", "tokens": sum(shipped.values()),
+              "children": [{"name": "tool schemas", "tokens": sum(shipped.values()),
+                            "children": children}]}
+    return {"ts": ts, "provider": "openai", "model": "gpt-4o", "prompt_tokens": prompt,
+            "completion_tokens": 10, "total_tokens": prompt + 10, "cost_usd": cost,
+            "cached_tokens": cached, "detail": detail, "called_tools": called}
 
-    summary = st.reclaimable_summary()
-    actions = summary["actions"]
-    assert [a["action"][:5] for a in actions][:2] == ["Dedup", "Drop "]  # $0.30 ranks above $0.05
-    dedupe = actions[0]
-    assert dedupe["calls"] == 1 and dedupe["save_usd"] == 0.30 and dedupe["tokens"] == 5000
-    unused = actions[1]
-    assert unused["calls"] == 5 and round(unused["save_usd"], 2) == 0.05
-    # the "ok" finding is never surfaced as an action
+
+def test_reclaimable_counts_only_tools_never_used_across_window(tmp_path):
+    """A tool unused on one call is not waste (agents need their full toolset);
+    only tools never used across the whole window are reclaimable, and only once
+    there are enough calls to trust 'never'."""
+    import time
+    now = time.time()
+    shipped = {"search": 500, "send_email": 800, "dead_tool": 1200}
+
+    # under the gate: 5 calls, dead_tool never used -> not yet claimed
+    few = SQLiteStore(str(tmp_path / "few.db"))
+    for i in range(5):
+        few.record(_tool_trace(now + i, shipped, ["search"]))
+    s = few.reclaimable_summary()
+    assert s["reclaimable_usd"] == 0.0  # "never used" not trustworthy yet
+    assert s["unused_tools_pending"] == 2  # send_email + dead_tool flagged as pending
+
+    # over the gate: 25 calls, send_email gets used once, dead_tool never
+    many = SQLiteStore(str(tmp_path / "many.db"))
+    for i in range(25):
+        called = ["search", "send_email"] if i == 0 else ["search"]
+        many.record(_tool_trace(now + i, shipped, called))
+    s2 = many.reclaimable_summary()
+    assert s2["reclaimable_usd"] > 0  # dead_tool is genuinely reclaimable now
+    assert s2["unused_tools_pending"] == 0
+    act = s2["actions"][0]
+    assert "1 tools never used" in act["action"] and act["save_usd"] > 0
+
+
+def test_reclaimable_ranks_dead_tools_dupes_and_caching(tmp_path):
+    """The how-to list surfaces each reclaimable source, ranked by dollars."""
+    import time
+    now = time.time()
+    st = SQLiteStore(str(tmp_path / "rank.db"))
+    shipped = {"used": 300, "dead": 400}
+    for i in range(22):
+        tr = _tool_trace(now + i, shipped, ["used"])
+        tr["analysis"] = {"findings": [
+            {"severity": "warn", "title": "Duplicated content in the context",
+             "reclaimable_tokens": 100, "save_usd": 1.50},
+            {"severity": "ok", "title": "Prompt caching is active"}]}
+        st.record(tr)
+    actions = st.reclaimable_summary()["actions"]
+    assert actions[0]["action"].startswith("Dedupe")  # $1.50 * 22 dominates
+    assert any("never used" in a["action"] for a in actions)
     assert all("caching is active" not in a["action"] for a in actions)
 
 

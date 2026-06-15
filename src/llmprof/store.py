@@ -17,6 +17,8 @@ import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+from . import pricing
+
 
 class BaseStore(ABC):
     """The storage contract every backend implements.
@@ -320,27 +322,60 @@ class SQLiteStore(BaseStore):
     # a short burst to 24/7 (which produced absurd, wildly swinging figures).
     _PROJECT_MIN_CALLS = 50
     _PROJECT_MIN_SPAN_S = 12 * 3600  # 12 hours
+    # "never used" is only a trustworthy reclaimable signal once we have seen the
+    # toolset exercised across enough calls; below this we do not claim it.
+    _DEAD_TOOL_MIN_CALLS = 20
 
     def reclaimable_summary(self) -> dict:
-        """Reclaimable spend across recorded calls. The percent of spend and the
-        absolute reclaimable are always trustworthy; a per-month projection is
-        only included once there is enough data (`projectable`). `actions` ranks
-        the concrete things to do about it, aggregated from the per-call
-        findings, so the headline number comes with a how, not just a how-much."""
+        """Honestly reclaimable spend across recorded calls. Three sources, each
+        priced at the call's cache-aware rate so the figure never exceeds spend:
+          - removable duplicate content,
+          - the recurring saving from caching an uncached stable prefix,
+          - schemas of tools never used across the whole window (gated on
+            `_DEAD_TOOL_MIN_CALLS`, since a tool unused on one call is not waste).
+        `actions` lists what to do about each, ranked by dollars. The percent and
+        absolute are always trustworthy; a per-month projection only appears with
+        enough spread-out data (`projectable`)."""
         with self._connect() as conn:
-            r = conn.execute(
-                """SELECT COUNT(*) AS calls,
-                          COALESCE(SUM(reclaimable_usd), 0) AS reclaimable,
-                          COALESCE(SUM(cost_usd), 0) AS cost,
-                          MIN(ts) AS first_ts, MAX(ts) AS last_ts
-                   FROM traces WHERE reclaimable_usd IS NOT NULL"""
-            ).fetchone()
-            findings_rows = conn.execute(
-                "SELECT analysis FROM traces WHERE analysis IS NOT NULL"
+            rows = conn.execute(
+                """SELECT ts, model, provider, prompt_tokens, cached_tokens,
+                          cache_write_tokens, cost_usd, detail, called_tools, analysis
+                   FROM traces"""
             ).fetchall()
-        calls = r["calls"] or 0
-        reclaimable, cost = r["reclaimable"] or 0.0, r["cost"] or 0.0
-        span_s = max((r["last_ts"] or 0) - (r["first_ts"] or 0), 0)
+
+        calls = len(rows)
+        cost = sum(r["cost_usd"] or 0.0 for r in rows)
+        ts_vals = [r["ts"] for r in rows if r["ts"] is not None]
+        span_s = max((max(ts_vals) - min(ts_vals)) if ts_vals else 0, 0)
+
+        dup_usd = cache_usd = 0.0
+        shipped: dict[str, int] = {}   # tool -> representative schema tokens
+        ever_called: set[str] = set()
+        per_call: list[tuple[float, dict]] = []  # (effective rate, this call's tool tokens)
+        for r in rows:
+            called = json.loads(r["called_tools"]) if r["called_tools"] else []
+            ever_called.update(called)
+            tool_map = _tool_schema_tokens(r["detail"])
+            for name, tok in tool_map.items():
+                shipped[name] = max(shipped.get(name, 0), tok)
+            per_call.append((_effective_rate(r), tool_map))
+            ana = json.loads(r["analysis"]) if r["analysis"] else {}
+            for f in ana.get("findings", []):
+                title = f.get("title", "")
+                if "Duplicated content" in title:
+                    dup_usd += f.get("save_usd") or 0.0
+                elif "Stable prefix is not cached" in title:
+                    cache_usd += f.get("save_usd") or 0.0
+
+        dead = {n for n in shipped if n not in ever_called}
+        dead_gated = calls >= self._DEAD_TOOL_MIN_CALLS
+        dead_usd = 0.0
+        if dead and dead_gated:
+            for rate, tool_map in per_call:
+                dead_tok = sum(tok for n, tok in tool_map.items() if n in dead)
+                dead_usd += dead_tok / 1000 * rate
+
+        reclaimable = dup_usd + cache_usd + dead_usd
         projectable = calls >= self._PROJECT_MIN_CALLS and span_s >= self._PROJECT_MIN_SPAN_S
         out = {
             "calls": calls,
@@ -351,13 +386,32 @@ class SQLiteStore(BaseStore):
             "projectable": projectable,
             "monthly_reclaimable_usd": None,
             "monthly_calls": None,
-            "actions": _rank_actions(findings_rows),
+            "unused_tools_pending": len(dead) if (dead and not dead_gated) else 0,
+            "actions": self._reclaim_actions(dead_usd, dead, calls, dup_usd, cache_usd),
         }
         if projectable:
             days = span_s / 86400
             out["monthly_reclaimable_usd"] = round(reclaimable / days * 30, 2)
             out["monthly_calls"] = int(calls / days * 30)
         return out
+
+    @staticmethod
+    def _reclaim_actions(dead_usd, dead, calls, dup_usd, cache_usd) -> list[dict]:
+        """The concrete fixes behind the reclaimable number, ranked by dollars."""
+        actions = []
+        if dead_usd > 0:
+            actions.append({
+                "action": f"Lazy-load or drop {len(dead)} tools never used in {calls} calls.",
+                "calls": calls, "save_usd": round(dead_usd, 6)})
+        if dup_usd > 0:
+            actions.append({
+                "action": "Dedupe repeated context, instructions, or retrieved chunks.",
+                "calls": calls, "save_usd": round(dup_usd, 6)})
+        if cache_usd > 0:
+            actions.append({
+                "action": "Turn on prompt caching for your stable system + tools prefix.",
+                "calls": calls, "save_usd": round(cache_usd, 6)})
+        return sorted(actions, key=lambda a: a["save_usd"], reverse=True)
 
     def routes(self, limit: int = 15) -> list[dict]:
         """Most expensive prompt templates (system prompt + tool set), so you can
@@ -394,59 +448,28 @@ class SQLiteStore(BaseStore):
         return n or 0
 
 
-# Each per-call finding maps to one of a few concrete actions. Keyed by a stable
-# category (so "3 of 12 tools unused" and "5 of 20 tools unused" merge) -> the
-# fix to surface. Order here is the tie-break when savings are equal.
-_ACTIONS = [
-    ("unused-tools", "tools were not called",
-     "Drop tools the model does not use on a given call, or load them lazily."),
-    ("duplicate", "Duplicated content",
-     "Dedupe repeated context, instructions, or retrieved chunks."),
-    ("uncached-prefix", "not cached",
-     "Turn on prompt caching for your stable system + tools prefix."),
-    ("tool-heavy", "Tool schemas are",
-     "Trim tool descriptions and parameter lists, or split rarely used tools out."),
-    ("history", "History and tool results",
-     "Summarize or truncate older turns to slow context creep."),
-    ("large-system", "Large system prompt",
-     "Trim the system prompt; move examples to a cached prefix."),
-]
+def _tool_schema_tokens(detail_json: str | None) -> dict[str, int]:
+    """{tool name -> schema tokens} from a stored detail tree, or {}."""
+    if not detail_json:
+        return {}
+    try:
+        tree = json.loads(detail_json)
+    except (TypeError, ValueError):
+        return {}
+    for child in tree.get("children") or []:
+        if child.get("name") == "tool schemas":
+            return {c["name"]: c.get("tokens", 0) for c in (child.get("children") or [])
+                    if c.get("name")}
+    return {}
 
 
-def _classify_finding(title: str) -> tuple[str, str] | None:
-    for category, needle, fix in _ACTIONS:
-        if needle in title:
-            return category, fix
-    return None
-
-
-def _rank_actions(rows: list, limit: int = 4) -> list[dict]:
-    """Aggregate per-call findings into ranked, actionable suggestions: what to
-    do about the reclaimable spend, how many calls it affects, and the dollars
-    and tokens it touches. Ranked by dollars, then tokens, then call count."""
-    agg: dict[str, dict] = {}
-    for row in rows:
-        try:
-            analysis = json.loads(row["analysis"])
-        except (TypeError, ValueError):
-            continue
-        for f in (analysis or {}).get("findings", []):
-            if f.get("severity") == "ok":
-                continue
-            hit = _classify_finding(f.get("title", ""))
-            if not hit:
-                continue
-            category, fix = hit
-            a = agg.setdefault(category, {"action": fix, "calls": 0,
-                                          "save_usd": 0.0, "tokens": 0})
-            a["calls"] += 1
-            a["save_usd"] += f.get("save_usd") or 0.0
-            a["tokens"] += f.get("reclaimable_tokens") or 0
-    ranked = sorted(agg.values(),
-                    key=lambda a: (a["save_usd"], a["tokens"], a["calls"]), reverse=True)
-    for a in ranked:
-        a["save_usd"] = round(a["save_usd"], 6)
-    return ranked[:limit]
+def _effective_rate(row) -> float:
+    """Recompute a call's cache-aware $/1k input rate from stored token counts."""
+    prompt = row["prompt_tokens"] or 0
+    cached = row["cached_tokens"] or 0
+    cw = row["cache_write_tokens"] or 0
+    fresh = max(prompt - cached - cw, 0)
+    return pricing.effective_input_per_1k(row["model"], row["provider"], fresh, cached, cw) or 0.0
 
 
 def _sqlite_path_from_url(url: str) -> str | None:

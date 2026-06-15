@@ -21,13 +21,15 @@ def test_duplicate_tokens_counts_extra_copies():
     assert analyze.duplicate_tokens(["tiny", "tiny"], "gpt-4o") == 0
 
 
-def test_analyze_flags_unused_tools_with_reclaimable():
+def test_analyze_flags_unused_tools_as_informational_not_reclaimable():
+    # an agent needs its full toolset across a run, so tools unused on ONE call
+    # are not per-call reclaimable; the finding is informational only.
     res = analyze.analyze(_tree(), texts=[], input_per_1k=0.0025, called_tools=["a"])
     unused = next(f for f in res["findings"] if "were not called" in f["title"])
-    assert unused["reclaimable_tokens"] == 200
-    assert unused["save_usd"] == round(200 / 1000 * 0.0025, 6)
-    assert res["reclaimable_tokens"] == 200
-    assert res["reclaimable_usd"] > 0
+    assert unused["reclaimable_tokens"] == 0
+    assert unused["save_usd"] is None
+    assert res["reclaimable_tokens"] == 0  # not counted toward the headline
+    assert res["reclaimable_usd"] == 0.0
 
 
 def test_analyze_flags_duplicates():
@@ -44,12 +46,12 @@ def test_analyze_caching_tip_for_uncached_prefix():
     res = analyze.analyze(tree, texts=[], input_per_1k=0.0025,
                           cached_tokens=None, called_tools=["a"])
     tip = next(f for f in res["findings"] if "not cached" in f["title"])
-    assert tip["save_usd"] > 0  # recurring caching savings, shown inline
+    assert tip["save_usd"] > 0  # recurring caching savings
     assert tip["reclaimable_tokens"] == 0  # caching is not removable tokens
-    # ...and the caching tip must NOT inflate the headline reclaimable (no double
-    # counting against the prefix). With no duplicates/unused tools, headline is 0.
+    # an uncached stable prefix IS reclaimable (via caching), so it counts toward
+    # the per-call reclaimable dollars, but adds no removable tokens.
     assert res["reclaimable_tokens"] == 0
-    assert res["reclaimable_usd"] == 0.0
+    assert res["reclaimable_usd"] == tip["save_usd"]
 
 
 def test_analyze_does_not_suggest_caching_when_already_caching():
