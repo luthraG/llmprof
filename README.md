@@ -3,10 +3,12 @@
 <p align="center"><b>pprof for your LLM context.</b> See where every token and dollar goes.</p>
 
 <p align="center">
+  <a href="https://pypi.org/project/llmprof/"><img src="https://img.shields.io/pypi/v/llmprof?color=7c84ff&label=pypi" alt="PyPI"></a>
+  <a href="https://www.npmjs.com/package/llmprof"><img src="https://img.shields.io/npm/v/llmprof?color=7c84ff&label=npm" alt="npm"></a>
   <a href="https://github.com/luthraG/llmprof/actions/workflows/ci.yml"><img src="https://github.com/luthraG/llmprof/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/python-3.9%2B-blue" alt="Python 3.9+">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
-  <a href="https://luthrag.github.io/llmprof"><img src="https://img.shields.io/badge/docs-llmprof.dev-7c84ff" alt="Docs"></a>
+  <a href="https://luthrag.github.io/llmprof"><img src="https://img.shields.io/badge/docs-online-7c84ff" alt="Docs"></a>
   <img src="https://img.shields.io/badge/100%25_local-prompts_never_leave_your_machine-3ddc97" alt="100% local">
 </p>
 
