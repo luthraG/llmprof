@@ -45,3 +45,26 @@ llmprof reset --yes  # skip the prompt
 Useful after changing models or upgrading: analysis (cost, reclaimable) is stored
 per trace at capture time and is not recomputed, so old traces keep their old
 numbers. Resetting gives the aggregates a clean baseline.
+
+## `llmprof selftest`
+
+Replay request/response fixtures through the real pipeline and check the recorded
+trace: token capture, cost, and invariants like `cached <= prompt` and
+`reclaimable <= spend`. Catches data-correctness regressions without a live API.
+
+```bash
+llmprof selftest                 # built-in synthetic fixtures (one per wire)
+llmprof selftest --corpus ./fix  # also replay fixtures you captured (see below)
+```
+
+The ground truth is the upstream response's own usage block, which the proxy
+sees directly, so no API key is needed. Exits non-zero if any check fails.
+
+To build your own corpus, run the proxy with `LLMPROF_CAPTURE` pointing at a
+directory; every call is saved there as a replayable fixture:
+
+```bash
+LLMPROF_CAPTURE=./fixtures llmprof up
+# ...use it normally, then:
+llmprof selftest --corpus ./fixtures
+```

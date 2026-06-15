@@ -17,6 +17,8 @@ are set.
 | `LLMPROF_HOME` | `~/.llmprof` | Directory for the SQLite database. |
 | `LLMPROF_DB_URL` | _(unset)_ | Storage backend URL (`sqlite://...`, `postgresql://...`). Overrides `LLMPROF_HOME`. See [Storage backends](../storage/). |
 | `LLMPROF_PRICING` | _(unset)_ | Path to a JSON file of price overrides. See [Providers & pricing](../pricing/). |
+| `LLMPROF_CAPTURE` | _(unset)_ | Directory to save each call as a replayable fixture. Feed it to `llmprof selftest --corpus`. See [CLI](../cli/). |
+| `LLMPROF_DEBUG` | _(unset)_ | When set, log each captured call and upstream issue to stderr. |
 
 ## CLI flags
 
