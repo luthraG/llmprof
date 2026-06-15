@@ -119,6 +119,30 @@ def reset(yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirma
 
 
 @app.command()
+def selftest(corpus: str = typer.Option(
+        None, help="Also replay every *.json fixture in this directory "
+        "(e.g. one recorded with LLMPROF_CAPTURE).")):
+    """Replay request/response fixtures through the real pipeline and check the
+    recorded trace: token capture, cost, and invariants like cached <= prompt and
+    reclaimable <= spend. Catches data-correctness regressions without a live API."""
+    from .selftest import run
+
+    ok, results = run(corpus)
+    for name, problems in results:
+        if problems:
+            console.print(f"[red]FAIL[/] {name}")
+            for p in problems:
+                console.print(f"   [red]- {p}[/]")
+        else:
+            console.print(f"[green]PASS[/] {name}")
+    passed = sum(1 for _, p in results if not p)
+    if not ok:
+        console.print(f"[red]{passed}/{len(results)} replay checks passed[/]")
+        raise typer.Exit(code=1)
+    console.print(f"[green]all {len(results)} replay checks passed[/]")
+
+
+@app.command()
 def version():
     """Print version."""
     console.print(f"llmprof {__version__}")

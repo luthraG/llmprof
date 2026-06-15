@@ -374,6 +374,26 @@ def _sse_objects(chunk: bytes):
 _SCRAPERS = {"chat": _scrape_openai, "messages": _scrape_anthropic, "responses": _scrape_responses}
 
 
+def _capture(provider: str, wire: str, endpoint: str, stream: bool,
+             request_payload: dict, response_text: str) -> None:
+    """When LLMPROF_CAPTURE points at a directory, save the (request, response)
+    pair as a replayable fixture. This lets a user build a private corpus by
+    using the proxy normally, which `llmprof selftest --corpus DIR` then replays.
+    Never raises - capture must not affect the proxied call."""
+    target = os.environ.get("LLMPROF_CAPTURE")
+    if not target:
+        return
+    try:
+        os.makedirs(target, exist_ok=True)
+        blob = json.dumps({"provider": provider, "wire": wire, "endpoint": endpoint,
+                           "stream": stream, "request": request_payload, "response": response_text})
+        name = hashlib.sha1(blob.encode("utf-8")).hexdigest()[:16] + ".json"
+        with open(os.path.join(target, name), "w", encoding="utf-8") as fh:
+            fh.write(blob)
+    except OSError as exc:
+        _dbg(f"capture failed: {exc}")
+
+
 def _upstream_error(provider: str, upstream: str, exc: Exception) -> Response:
     """A clean 502 when the upstream is unreachable, instead of a 500 stack trace.
     The proxy must not crash-log when the network blips; the client gets a JSON
@@ -415,11 +435,16 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str, 
         state = {"text": [], "fresh": None, "read": None, "write": None,
                  "output": None, "prompt_total": None, "tools": []}
 
+        raw_chunks: list[bytes] = []
+
         async def gen():
             async for chunk in upstream.aiter_raw():
                 yield chunk
+                raw_chunks.append(chunk)
                 scrape(chunk, state)
             await upstream.aclose()
+            _capture(provider, wire, endpoint, True, payload,
+                     b"".join(raw_chunks).decode("utf-8", "ignore"))
             usage = {k: state.get(k) for k in ("fresh", "read", "write", "output", "prompt_total")}
             # tokenization runs in a threadpool after the stream, off the loop
             await run_in_threadpool(
@@ -438,6 +463,7 @@ async def _handle(app: FastAPI, request: Request, endpoint: str, provider: str, 
     except httpx.RequestError as exc:
         return _upstream_error(provider, app.state.upstreams[provider], exc)
     data = upstream.content
+    _capture(provider, wire, endpoint, False, payload, data.decode("utf-8", "ignore"))
     usage = _usage_from_body(data, wire)
     called = _called_tools_from_body(data, wire)
     # forward immediately; attribute + record in the background so the proxy adds
