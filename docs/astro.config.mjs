@@ -13,6 +13,14 @@ export default defineConfig({
 			description: 'pprof for your LLM context. See where every token and dollar goes.',
 			logo: { src: './src/assets/logo.svg', replacesTitle: false },
 			favicon: '/favicon.svg',
+			// Social card. og.png lives in public/ so it has a stable absolute URL.
+			head: [
+				{ tag: 'meta', attrs: { property: 'og:image', content: 'https://luthrag.github.io/llmprof/og.png' } },
+				{ tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
+				{ tag: 'meta', attrs: { property: 'og:image:height', content: '630' } },
+				{ tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
+				{ tag: 'meta', attrs: { name: 'twitter:image', content: 'https://luthrag.github.io/llmprof/og.png' } },
+			],
 			customCss: ['./src/styles/theme.css'],
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/luthraG/llmprof' },
