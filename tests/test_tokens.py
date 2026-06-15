@@ -208,6 +208,17 @@ def test_pricing_known_and_unknown():
     assert pricing.cost("some-unknown-model", 1000, 1000) is None
 
 
+def test_normalize_model_strips_variant_annotation():
+    # the 1M-context beta is a mode, not a different model; group it under the base
+    assert pricing.normalize_model("claude-sonnet-4-6[1m]") == "claude-sonnet-4-6"
+    assert pricing.normalize_model("gpt-4o") == "gpt-4o"
+    assert pricing.normalize_model("") == ""
+    assert pricing.normalize_model(None) is None
+    # pricing already resolves the annotated id via substring match
+    base = pricing.cost("claude-sonnet-4-6", 1000, 0)
+    assert pricing.cost("claude-sonnet-4-6[1m]", 1000, 0) == base
+
+
 def test_responses_to_chat_adapter():
     payload = {
         "model": "gpt-5.4", "instructions": "You are a careful assistant. " * 4,

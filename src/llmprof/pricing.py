@@ -13,6 +13,19 @@ from __future__ import annotations
 
 import json
 import os
+import re
+
+# trailing annotations some clients append to a model id, e.g. the 1M-context
+# beta "claude-sonnet-4-6[1m]". They are a mode, not a different model, so they
+# are stripped for grouping/display; pricing already substring-matches the base.
+_MODEL_ANNOTATION = re.compile(r"\s*\[[^\]]*\]\s*$")
+
+
+def normalize_model(model: str | None) -> str | None:
+    """Strip a trailing [..] annotation so model variants group together."""
+    if not model:
+        return model
+    return _MODEL_ANNOTATION.sub("", model).strip() or model
 
 # (input_per_1k, output_per_1k). Substring-matched against the model id, longest
 # key first, so "gpt-4o-mini" beats "gpt-4o" and "claude-sonnet-4" also matches

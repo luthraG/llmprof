@@ -434,6 +434,7 @@ def _record_blocking(app, provider, endpoint, model, payload, usage,
     breakdown = _attribute(payload, provider)
     msg_fp = tokens.message_fingerprint(payload, provider)
     route = tokens.route_label(payload, provider)
+    model = pricing.normalize_model(model)  # group [1m]-style variants under the base
     usage = usage or {}
 
     prompt_total = usage.get("prompt_total")
