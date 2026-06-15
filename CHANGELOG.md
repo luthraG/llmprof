@@ -21,7 +21,9 @@ Initial public release.
   with calls grouped into sessions by message fingerprint.
 - **Cost leaderboard** - which prompt template (system prompt + tools) drives the
   bill, not just which model.
-- **Cost for 100+ models**, cache-aware, overridable via `LLMPROF_PRICING`.
+- **Cost for 1000+ models** from a bundled, offline LiteLLM pricing snapshot,
+  cache-aware, with curated rates for headline models and overridable via
+  `LLMPROF_PRICING`.
 - **Dual provider, one proxy** - `/v1/chat/completions`, `/v1/responses`, and
   `/v1/messages`, so Claude Code and the Codex CLI can be profiled together.
 - **Python and JavaScript SDKs** for exact, hand-labeled component attribution
