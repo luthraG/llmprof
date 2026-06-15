@@ -497,7 +497,9 @@ function renderSuggestions(tree, t) {
   $("#opt-count").textContent = count ? `${count} found` : "clean";
   el.innerHTML = findings.map(f => {
     const chip = f.save_usd ? ` <span class="save">~${money(f.save_usd)}/call</span>` : "";
-    return `<div class="sugg ${f.severity}"><span class="si">${OPT_ICON[f.severity] || OPT_ICON.tip}</span>`+
+    // namespace the severity class: a bare "tip"/"ok" would collide with global
+    // classes (e.g. the flame-graph tooltip .tip is position:fixed; opacity:0).
+    return `<div class="sugg sev-${f.severity}"><span class="si">${OPT_ICON[f.severity] || OPT_ICON.tip}</span>`+
       `<span class="stext"><b>${esc(f.title)}</b> ${esc(f.body)}${chip}</span></div>`;
   }).join("");
 }

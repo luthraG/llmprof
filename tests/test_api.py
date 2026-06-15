@@ -69,6 +69,12 @@ def test_static_assets_served(tmp_path):
     assert "no-store" in js.headers.get("cache-control", "")
     assert "no-store" in css.headers.get("cache-control", "")
     assert "no-store" in client.get("/").headers.get("cache-control", "")
+    # optimization findings namespace their severity class (sev-tip, not a bare
+    # "tip") so they cannot collide with the global .tip tooltip rule, which is
+    # position:fixed; opacity:0 and made 'tip' findings render invisibly.
+    assert "sugg sev-" in js.text
+    assert 'class="sugg ${f.severity}"' not in js.text
+    assert ".tip {" in css.text and "opacity: 0" in css.text  # the colliding rule still exists
 
 
 def test_empty_breakdown_served(tmp_path):
