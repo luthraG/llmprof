@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://luthrag.github.io/llmprof
+    about: Setup, integrations, configuration, and concepts.
+  - name: Questions and ideas
+    url: https://github.com/luthraG/llmprof/discussions
+    about: Ask a question or float an idea before opening an issue.

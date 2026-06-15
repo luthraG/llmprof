@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest a capability or improvement.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        llmprof is a focused profiler: where your tokens and dollars go, and what
+        to cut. Proposals that sharpen that are the best fit; full observability
+        platform features (evals, prompt management, hosted cloud) are out of scope.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that llmprof makes hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should it do? A flag, a panel, a new provider, an SDK method?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false

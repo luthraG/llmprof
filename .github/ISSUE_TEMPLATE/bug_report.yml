@@ -1,0 +1,58 @@
+name: Bug report
+description: Something the proxy, dashboard, SDK, or CLI does wrong.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing. llmprof runs locally, so please include enough to
+        reproduce. Never paste real prompts, completions, or API keys.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+      placeholder: Pointed the OpenAI client at the proxy; the dashboard shows cost as $0.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps. A trimmed request shape (no prompt text) helps.
+      placeholder: |
+        1. llmprof up
+        2. call /v1/chat/completions with model X, streaming
+        3. open the dashboard
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: Provider and client
+      placeholder: OpenAI / Anthropic / Claude Code / Codex, streamed or buffered
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: llmprof version
+      description: Output of `llmprof version`.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: OS and Python
+      placeholder: macOS 15 / Python 3.12
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Proxy output with `LLMPROF_DEBUG=1`, or browser console errors. Redact anything sensitive.
+      render: shell
+    validations:
+      required: false
