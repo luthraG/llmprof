@@ -25,10 +25,11 @@
   "keywords": ["llm", "tokens", "profiler", "openai", "anthropic", "rag", "cost"],
   "repository": {
     "type": "git",
-    "url": "https://github.com/luthraG/llmprof.git",
+    "url": "git+https://github.com/luthraG/llmprof.git",
     "directory": "sdk-js"
   },
   "homepage": "https://luthrag.github.io/llmprof",
   "license": "MIT",
-  "author": "Gaurav Luthra"
+  "author": "Gaurav Luthra",
+  "publishConfig": { "access": "public" }
 }
