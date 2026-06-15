@@ -24,6 +24,26 @@ def test_open_store_writes_to_the_given_path(tmp_path):
     assert len(open_store(db).recent(10)) == 1
 
 
+def test_totals_count_every_call_not_just_the_recent_window(tmp_path):
+    """The header KPIs read store.totals(), which must aggregate the whole table.
+    Regression: the dashboard used to sum only the last 100 loaded traces, so the
+    header undercounted calls/tokens/cost once there were more than 100 calls."""
+    s = open_store(str(tmp_path / "t.db"))
+    for _ in range(150):
+        s.record({"provider": "openai", "model": "gpt-4o", "prompt_tokens": 10,
+                  "completion_tokens": 2, "total_tokens": 12, "cost_usd": 0.01})
+    assert len(s.recent(100)) == 100          # the list view is capped
+    t = s.totals()
+    assert t["calls"] == 150                  # totals are not
+    assert t["tokens"] == 150 * 12
+    assert t["cost"] == pytest.approx(150 * 0.01)
+
+
+def test_totals_on_empty_store_are_zero(tmp_path):
+    t = open_store(str(tmp_path / "e.db")).totals()
+    assert t == {"calls": 0, "tokens": 0, "cost": 0.0}
+
+
 def test_sqlite_url_scheme(tmp_path):
     db = tmp_path / "u.db"
     s = open_store(url=f"sqlite://{db}")

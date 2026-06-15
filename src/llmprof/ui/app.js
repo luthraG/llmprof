@@ -20,6 +20,7 @@ const ago = (ts) => {
 };
 
 let TRACES = [];
+let SUMMARY = null;   // server-side aggregates (true totals, per-day); not capped by the trace limit
 let selectedId = null;
 let focusPath = [];   // array of nodes from root to current focus
 let CURRENT_TRACE = null;
@@ -29,7 +30,13 @@ let view = "calls";  // "calls" | "trends" | "timeline"
 let selectedSession = null;
 
 async function load() {
-  const r = await fetch("/llmprof/api/traces?limit=100");
+  // Fetch the capped trace list (for the calls view) and the server-side summary
+  // (true all-time totals, per-day costs) together. The header KPIs and sparkline
+  // use the summary so they count every call, not just the last 100 shown here.
+  const [r, sr] = await Promise.all([
+    fetch("/llmprof/api/traces?limit=100"),
+    fetch("/llmprof/api/summary"),
+  ]);
   const data = await r.json();
   // self-heal a stale tab: if the proxy restarted with new UI assets, the JS in
   // this tab is out of date and would render new server data with old code.
@@ -39,6 +46,7 @@ async function load() {
     return;
   }
   TRACES = data.traces || [];
+  try { SUMMARY = await sr.json(); } catch (e) { SUMMARY = null; }
   const hosts = [...new Set(Object.values(data.upstreams || { x: data.upstream || "" })
     .map(u => (u || "").replace(/^https?:\/\//, "")).filter(Boolean))];
   $("#upstream").textContent = hosts.join(" + ");
@@ -63,9 +71,10 @@ async function renderTrends(force) {
   if (!force && _trendsSig === trendsSig() && $("#main .trends-cards")) return;
   _trendsSig = trendsSig();
   const main = $("#main");
-  let s;
-  try { s = await (await fetch("/llmprof/api/summary")).json(); }
-  catch (e) { return; }
+  // load() already fetched the summary into SUMMARY; reuse it so the 4s poll does
+  // not fetch twice. Fall back to a direct fetch if a render happens before load().
+  let s = SUMMARY;
+  if (!s) { try { s = await (await fetch("/llmprof/api/summary")).json(); } catch (e) { return; } }
   const days = s.days || [], models = s.models || [], routes = s.routes || [];
   const rec = s.reclaimable || {};
   if (!days.length) {
@@ -253,9 +262,12 @@ async function renderTimeline(force) {
 }
 
 function renderKpis() {
-  const calls = TRACES.length;
-  const tokens = TRACES.reduce((a,t) => a + (t.total_tokens||0), 0);
-  const cost = TRACES.reduce((a,t) => a + (t.cost_usd||0), 0);
+  // Prefer the server-side all-time totals; they count every call. Fall back to
+  // summing the loaded traces only if the summary has not arrived yet.
+  const t = SUMMARY && SUMMARY.totals;
+  const calls = t ? t.calls : TRACES.length;
+  const tokens = t ? t.tokens : TRACES.reduce((a,x) => a + (x.total_tokens||0), 0);
+  const cost = t ? t.cost : TRACES.reduce((a,x) => a + (x.cost_usd||0), 0);
   $("#kpi-calls").textContent = fmt(calls);
   $("#kpi-tokens").textContent = fmt(tokens);
   $("#kpi-cost").textContent = money(cost);
@@ -264,11 +276,17 @@ function renderKpis() {
 
 function drawSpark() {
   const el = $("#spark"); if (!el) return;
-  // sum cost by day, oldest -> newest, last 10 days present
-  const byDay = {};
-  for (const t of TRACES) {
-    const d = new Date((t.ts||0) * 1000).toISOString().slice(0, 10);
-    byDay[d] = (byDay[d] || 0) + (t.cost_usd || 0);
+  // cost per day, oldest -> newest, last 10 days. Use the server-side daily
+  // totals so the sparkline matches the Trends chart; fall back to the loaded
+  // traces only until the summary arrives.
+  let byDay = {};
+  if (SUMMARY && SUMMARY.days && SUMMARY.days.length) {
+    for (const d of SUMMARY.days) byDay[d.day] = d.cost || 0;
+  } else {
+    for (const t of TRACES) {
+      const d = new Date((t.ts||0) * 1000).toISOString().slice(0, 10);
+      byDay[d] = (byDay[d] || 0) + (t.cost_usd || 0);
+    }
   }
   const days = Object.keys(byDay).sort().slice(-10);
   if (!days.length) { el.innerHTML = ""; return; }

@@ -132,6 +132,7 @@ def create_app(db_path: str | None = None, upstream: str | None = None,
     @app.get("/llmprof/api/summary")
     async def api_summary() -> dict:
         return {
+            "totals": app.state.store.totals(),
             "days": app.state.store.daily_summary(),
             "models": app.state.store.model_summary(),
             "routes": app.state.store.routes(),

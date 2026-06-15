@@ -123,6 +123,9 @@ def test_api_summary(tmp_path):
     client = _app_with_one_trace(tmp_path)
     s = client.get("/llmprof/api/summary").json()
     assert "days" in s and "models" in s and "routes" in s
+    assert "totals" in s
+    assert s["totals"]["calls"] == 1 and s["totals"]["tokens"] == 54
+    assert s["totals"]["cost"] >= 0
     assert len(s["days"]) >= 1
     day = s["days"][-1]
     assert day["calls"] == 1 and day["tokens"] > 0

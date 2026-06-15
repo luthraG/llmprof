@@ -47,6 +47,13 @@ class BaseStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def totals(self) -> dict:
+        """All-time totals across every recorded call (calls, tokens, cost), for
+        the header KPIs. Independent of any list limit, so it does not undercount
+        once there are more calls than the recent-trace window shows."""
+        raise NotImplementedError
+
+    @abstractmethod
     def daily_summary(self, days: int = 30) -> list[dict]:
         """Per-day totals (oldest to newest), for trend charts."""
         raise NotImplementedError
@@ -272,6 +279,17 @@ class SQLiteStore(BaseStore):
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM traces WHERE id = ?", (trace_id,)).fetchone()
         return self._row(row, with_detail=True) if row else None
+
+    def totals(self) -> dict:
+        """All-time totals across every recorded call, for the header KPIs."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT COUNT(*) AS calls,
+                          COALESCE(SUM(total_tokens), 0) AS tokens,
+                          COALESCE(SUM(cost_usd), 0.0) AS cost
+                   FROM traces"""
+            ).fetchone()
+        return {"calls": row["calls"], "tokens": row["tokens"], "cost": row["cost"]}
 
     def daily_summary(self, days: int = 30) -> list[dict]:
         """Per-day totals (oldest to newest), for trend charts."""
