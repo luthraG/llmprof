@@ -393,13 +393,33 @@ function renderDetail(t) {
   const projection = t.cost_usd != null ? "&asymp; " + money(t.cost_usd * 1000) + " / 1k calls" : "";
   const ra = t.analysis;
   const flameIc = '<svg width="22" height="22" viewBox="0 0 24 24" fill="#f7a13b"><path d="M13 2c.9 3.2-2.2 4.3-2.2 7.4a2.8 2.8 0 005.6.2c0-1-.4-1.9-1-2.8 2.2 1 4 3.2 4 6.1A7.4 7.4 0 015 13.2C5 8.6 9.4 6.6 13 2z"/></svg>';
-  const reclaimBanner = (ra && (ra.reclaimable_tokens || ra.reclaimable_usd))
-    ? `<div class="reclaim-call"><span class="rc-ic">${flameIc}</span>`+
-      `<span class="rc-text">Reclaimable on this call: <b>${fmt(ra.reclaimable_tokens)} tokens</b>`+
-      `${ra.reclaimable_usd ? ` &middot; <b class="save">~${money(ra.reclaimable_usd)}</b>` : ""}</span>`+
-      `${ra.reclaimable_usd && t.cost_usd ? `<span class="rc-pct">${(ra.reclaimable_usd / t.cost_usd * 100).toFixed(0)}% of this call</span>` : ""}`+
-      `</div>`
-    : "";
+  // Itemize the per-call reclaimable so the dollar always reconciles with its
+  // parts: removable tokens are priced at this call's rate, while caching the
+  // stable prefix is a separate recurring saving with no token count. Showing a
+  // single token figure next to the combined dollar made the two look mismatched
+  // (4.5k tokens could never be the whole ~$0.13 - the rest is the caching tip).
+  let reclaimBanner = "";
+  if (ra && (ra.reclaimable_tokens || ra.reclaimable_usd)) {
+    const findings = ra.findings || [];
+    // removable-token dollars are the savings on findings that drop tokens;
+    // the remainder of the total is the caching saving (no tokens attached).
+    const removableUsd = findings.filter(f => (f.reclaimable_tokens || 0) > 0)
+      .reduce((s, f) => s + (f.save_usd || 0), 0);
+    const cachingUsd = Math.max((ra.reclaimable_usd || 0) - removableUsd, 0);
+    const parts = [];
+    if (ra.reclaimable_tokens)
+      parts.push(`remove <b>${fmt(ra.reclaimable_tokens)} duplicate tokens</b>`
+        + (removableUsd > 1e-9 ? ` (~${money(removableUsd)})` : ""));
+    if (cachingUsd > 1e-9)
+      parts.push(`cache the stable prefix (~${money(cachingUsd)}/call)`);
+    const total = ra.reclaimable_usd
+      ? ` <b class="save">~${money(ra.reclaimable_usd)}</b>` : "";
+    const pct = (ra.reclaimable_usd && t.cost_usd)
+      ? `<span class="rc-pct">${(ra.reclaimable_usd / t.cost_usd * 100).toFixed(0)}% of this call</span>` : "";
+    reclaimBanner = `<div class="reclaim-call"><span class="rc-ic">${flameIc}</span>`
+      + `<span class="rc-text">Reclaimable on this call:${total}`
+      + `${parts.length ? ` &middot; ${parts.join(" &middot; ")}` : ""}</span>${pct}</div>`;
+  }
   main.innerHTML =
     `<div class="detail-head">
        <div class="dh-title">

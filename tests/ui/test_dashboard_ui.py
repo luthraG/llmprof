@@ -88,6 +88,26 @@ def test_calls_view_render_is_sound(page_and_errors, dashboard):
     assert errors == []
 
 
+def test_per_call_reclaimable_banner_reconciles(page_and_errors, dashboard):
+    """The per-call banner itemizes reclaimable so the headline dollar equals the
+    sum of its parts (removable tokens + caching), instead of pairing a token
+    count with a larger combined dollar that a skeptic could not reconcile."""
+    import re
+
+    page, errors = page_and_errors
+    page.goto(dashboard, wait_until="load")
+    page.wait_for_selector("button.call")
+    page.click("button.call:has-text('claude-opus-4-8')")
+    page.wait_for_selector(".reclaim-call")
+    text = page.locator(".reclaim-call").inner_text()
+    assert "duplicate tokens" in text and "cache the stable prefix" in text
+    dollars = [float(x) for x in re.findall(r"\$([\d.]+)", text)]
+    assert len(dollars) >= 3, text
+    total, dup, caching = dollars[0], dollars[1], dollars[2]
+    assert abs(total - (dup + caching)) < 0.005, f"{total} != {dup} + {caching}"
+    assert errors == []
+
+
 def test_trends_view_render_is_sound(page_and_errors, dashboard):
     page, errors = page_and_errors
     page.goto(dashboard, wait_until="load")

@@ -100,6 +100,29 @@ def _seed(db_path: str) -> None:
     st.record({**run_base, "ts": 1021.0, "prompt_tokens": 200, "total_tokens": 210,
                "msg_fp": ["u:q1", "a:r1", "u:q2"]})
 
+    # 4. A call with BOTH removable (duplicate) tokens and a cacheable prefix, so
+    #    the per-call reclaim banner must itemize and reconcile: the headline
+    #    dollar equals dup-tokens $ + caching $, not a token count paired with a
+    #    bigger combined dollar.
+    recl_tree = {"name": "context", "tokens": 30000, "children": [
+        {"name": "system prompt", "tokens": 6000, "children": []},
+        {"name": "tool schemas", "tokens": 20000, "children": []},
+        {"name": "user input", "tokens": 4000, "children": []}]}
+    st.record({
+        "ts": 1005.0, "provider": "anthropic", "model": "claude-opus-4-8",
+        "endpoint": "/v1/messages", "status": 200, "prompt_tokens": 30000,
+        "completion_tokens": 100, "total_tokens": 30100, "cost_usd": 0.15, "streamed": True,
+        "components": {"system prompt": 6000, "tool schemas": 20000, "user input": 4000},
+        "detail": recl_tree, "cached_tokens": 0, "cache_write_tokens": 0, "called_tools": [],
+        "msg_fp": ["u:recl"],
+        "analysis": {"reclaimable_tokens": 4515, "reclaimable_usd": 0.13, "findings": [
+            {"severity": "warn", "title": "Duplicated content in the context",
+             "body": "4,515 tokens of content appear more than once.",
+             "reclaimable_tokens": 4515, "save_usd": 0.02},
+            {"severity": "tip", "title": "Stable prefix is not cached",
+             "body": "System prompt and tool schemas are 26,000 tokens that repeat every call.",
+             "reclaimable_tokens": 0, "save_usd": 0.11}]}})
+
 
 def _wait_healthy(base: str, proc: subprocess.Popen, timeout: float = 30.0) -> None:
     deadline = time.time() + timeout
