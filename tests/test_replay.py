@@ -82,6 +82,26 @@ def test_capture_mode_writes_a_replayable_fixture(tmp_path, monkeypatch):
     assert selftest.check_fixture(fixture) == []
 
 
+def test_reference_usage_matches_authored_expectations():
+    """The independent reference parser agrees with each fixture's hand-authored
+    `expected`, across all three wires - so it is a trustworthy ground truth for
+    captured fixtures that carry no `expected` of their own."""
+    for f in selftest.BUILTIN:
+        assert selftest.reference_usage(f) == f["expected"], f["name"]
+
+
+def test_captured_fixture_is_validated_against_its_response():
+    """A captured fixture has no `expected`; check_fixture derives the truth from
+    the response's usage and still verifies token capture end to end (this is what
+    runs against a real LLMPROF_CAPTURE corpus)."""
+    anth = next(f for f in selftest.BUILTIN if f["wire"] == "messages")
+    captured = {k: v for k, v in anth.items() if k != "expected"}
+    assert "expected" not in captured
+    assert selftest.check_fixture(captured) == []
+    # and a probe response with no usage simply yields nothing to compare
+    assert selftest.reference_usage({**captured, "response": "data: [DONE]\n\n"}) == {}
+
+
 def test_run_aggregates_and_reports():
     ok, results = selftest.run()
     assert ok is True

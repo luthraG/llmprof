@@ -82,14 +82,86 @@ def replay(fixture: dict) -> dict | None:
     return rows[0] if rows else None
 
 
+def _events(text: str):
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("data:"):
+            payload = line[5:].strip()
+            if payload and payload != "[DONE]":
+                try:
+                    yield json.loads(payload)
+                except ValueError:
+                    pass
+
+
+def reference_usage(fixture: dict) -> dict:
+    """Read prompt/completion/cached tokens straight from the response's usage
+    block, with deliberately dumb field reads and no merge logic. This is the
+    independent ground truth a captured fixture is checked against, so it can
+    disagree with the proxy's scraper if that ever regresses. Returns {} when the
+    response carries no usage (e.g. a token-count probe)."""
+    wire = fixture.get("wire")
+    resp = fixture.get("response") or ""
+    stream = fixture.get("stream")
+
+    if wire == "messages":  # Anthropic: input_tokens EXCLUDES cached, so sum them
+        usage, output = {}, None
+        if stream:
+            for ev in _events(resp):
+                if ev.get("type") == "message_start":
+                    usage = (ev.get("message") or {}).get("usage") or {}
+                elif ev.get("type") == "message_delta":
+                    out = (ev.get("usage") or {}).get("output_tokens")
+                    if out is not None:
+                        output = out
+        else:
+            try:
+                usage = json.loads(resp).get("usage") or {}
+            except ValueError:
+                usage = {}
+        if not usage:
+            return {}
+        read = usage.get("cache_read_input_tokens") or 0
+        write = usage.get("cache_creation_input_tokens") or 0
+        prompt = (usage.get("input_tokens") or 0) + read + write
+        out = output if output is not None else (usage.get("output_tokens") or 0)
+        return {"prompt_tokens": prompt, "completion_tokens": out, "cached_tokens": read}
+
+    # OpenAI chat / Responses: the prompt count already INCLUDES cached tokens
+    usage = {}
+    if stream:
+        for ev in _events(resp):
+            if ev.get("type") in ("response.completed", "response.incomplete", "response.failed"):
+                usage = (ev.get("response") or {}).get("usage") or {}
+            elif ev.get("usage"):
+                usage = ev["usage"]
+    else:
+        try:
+            usage = json.loads(resp).get("usage") or {}
+        except ValueError:
+            usage = {}
+    if not usage:
+        return {}
+    det = usage.get("input_tokens_details") or usage.get("prompt_tokens_details") or {}
+    return {
+        "prompt_tokens": usage.get("prompt_tokens") or usage.get("input_tokens") or 0,
+        "completion_tokens": usage.get("completion_tokens") or usage.get("output_tokens") or 0,
+        "cached_tokens": det.get("cached_tokens") or 0,
+    }
+
+
 def check_fixture(fixture: dict) -> list[str]:
-    """Replay a fixture and return problems (empty == healthy): any `expected`
-    field that does not match what was recorded, plus the universal invariants."""
+    """Replay a fixture and return problems (empty == healthy): the recorded
+    token counts must match `expected` (or, for a captured fixture with none, the
+    counts read independently from the response), plus the universal invariants."""
     trace = replay(fixture)
     if trace is None:
         return ["no trace was recorded"]
+    expected = dict(fixture.get("expected") or {})
+    if not expected:
+        expected = reference_usage(fixture)  # captured fixture: derive truth from the response
     problems = []
-    for key, want in (fixture.get("expected") or {}).items():
+    for key, want in expected.items():
         got = trace.get(key)
         if got != want:
             problems.append(f"{key}: recorded {got}, expected {want}")
