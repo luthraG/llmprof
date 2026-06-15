@@ -3,6 +3,13 @@ dist/
 # generated types
 .astro/
 
+# demo dashboard: copied verbatim from src/llmprof/ui at build time by
+# scripts/build-try.mjs (the prebuild step). Source of truth lives there; only
+# demo.js and demo-data.json are hand/script authored and committed.
+public/try/index.html
+public/try/app.js
+public/try/app.css
+
 # dependencies
 node_modules/
 

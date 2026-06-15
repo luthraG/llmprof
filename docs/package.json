@@ -5,6 +5,9 @@
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
+    "build:try": "node scripts/build-try.mjs",
+    "prebuild": "node scripts/build-try.mjs",
+    "predev": "node scripts/build-try.mjs",
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro"
