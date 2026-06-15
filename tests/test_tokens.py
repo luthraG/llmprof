@@ -114,13 +114,15 @@ def test_anthropic_tool_result_as_blocks():
 
 
 def test_message_fingerprint_prefix_chain():
-    """Turn N's fingerprint is a strict prefix of turn N+1's, for both providers."""
+    """Turn N's fingerprint is a strict prefix of turn N+1's, for both providers.
+    The (volatile) system block is excluded from the chain (see next test)."""
     t1 = {"messages": [{"role": "system", "content": "sys"}, {"role": "user", "content": "q1"}]}
     t2 = {"messages": t1["messages"] + [{"role": "assistant", "content": "a1"},
                                         {"role": "user", "content": "q2"}]}
     fp1 = tokens.message_fingerprint(t1, "openai")
     fp2 = tokens.message_fingerprint(t2, "openai")
-    assert len(fp1) == 2 and len(fp2) == 4
+    assert len(fp1) == 1 and len(fp2) == 3  # system dropped: q1 / q1,a1,q2
+    assert fp1[0].startswith("u:")
     assert fp2[: len(fp1)] == fp1  # earlier turn is a prefix of the later one
 
     a1 = {"system": "sys", "messages": [{"role": "user", "content": "hi"}]}
@@ -128,11 +130,32 @@ def test_message_fingerprint_prefix_chain():
                                                          {"role": "user", "content": "more"}]}
     fa1 = tokens.message_fingerprint(a1, "anthropic")
     fa2 = tokens.message_fingerprint(a2, "anthropic")
-    assert fa1[0].startswith("s:")  # system is part of the chain root for Anthropic
+    assert not fa1[0].startswith("s:")  # system is NOT part of the chain
     assert fa2[: len(fa1)] == fa1
     # an unrelated conversation does not share the prefix
     other = tokens.message_fingerprint({"messages": [{"role": "user", "content": "zzz"}]}, "openai")
     assert other != fp1[: len(other)]
+
+
+def test_message_fingerprint_ignores_volatile_system():
+    """Claude Code rewrites the system block every call (date, cwd, context-budget
+    reminders). The chain must be stable across that drift so the run groups,
+    rather than splitting into one session per turn."""
+    def turn(ver, msgs):
+        return {"system": [{"type": "text", "text": f"You are Claude Code. ctx_left={ver}"}],
+                "messages": list(msgs)}  # volatile system text, stable messages
+
+    base = [{"role": "user", "content": "build the feature"}]
+    t1 = tokens.message_fingerprint(turn("99%", base), "anthropic")
+    t2 = tokens.message_fingerprint(
+        turn("71%", base + [{"role": "assistant", "content": "ok"},
+                            {"role": "user", "content": "next"}]), "anthropic")
+    # different system text on each call, yet turn 1 still chains into turn 2
+    assert t1 and t2[: len(t1)] == t1
+    # openai system messages are dropped the same way
+    msgs = [{"role": "system", "content": "v1"}, {"role": "user", "content": "x"}]
+    o = tokens.message_fingerprint({"messages": msgs}, "openai")
+    assert len(o) == 1 and o[0].startswith("u:")
 
 
 def test_route_label_groups_by_template():

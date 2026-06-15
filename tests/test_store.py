@@ -115,6 +115,29 @@ def test_session_groups_despite_mutated_middle_context(tmp_path):
     assert [t["turn"] for t in turns] == [1, 2, 3]
 
 
+def test_agent_run_with_drifting_system_groups_into_one_session(tmp_path):
+    """End to end with the real fingerprint: a Claude-Code-style run that rewrites
+    its system block every call still chains into a single multi-turn run, instead
+    of showing 'no multi-turn runs' with every call its own session."""
+    from llmprof import tokens
+
+    st = SQLiteStore(str(tmp_path / "run.db"))
+    base = {"provider": "anthropic", "model": "claude-sonnet-4-6", "prompt_tokens": 1000,
+            "completion_tokens": 10, "total_tokens": 1010, "cost_usd": 0.01}
+    msgs = [{"role": "user", "content": "build the feature"}]
+    for i in range(4):
+        payload = {"system": [{"type": "text", "text": f"You are Claude Code. ctx={90 - i * 5}%"}],
+                   "messages": list(msgs)}
+        fp = tokens.message_fingerprint(payload, "anthropic")
+        st.record({**base, "ts": 1000.0 + i, "msg_fp": fp})
+        msgs += [{"role": "assistant", "content": f"step {i}"},
+                 {"role": "user", "content": f"continue {i}"}]
+
+    sessions = st.sessions(min_turns=2)
+    assert len(sessions) == 1, "the drifting-system run must be one session"
+    assert sessions[0]["turns"] == 4
+
+
 def test_clear_wipes_traces(tmp_path):
     st = SQLiteStore(str(tmp_path / "c.db"))
     for _ in range(3):

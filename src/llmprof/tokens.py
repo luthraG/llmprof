@@ -206,22 +206,22 @@ def _fp(text: str) -> str:
 
 
 def message_fingerprint(payload: dict | None, provider: str) -> list[str]:
-    """Ordered per-message fingerprints for a request.
+    """Ordered per-message fingerprints for a request, used to chain consecutive
+    calls of one run into a session.
 
     Turn N+1 of a conversation sends turn N's messages plus a few new ones, so
     turn N's fingerprint is a prefix of turn N+1's. The store uses that prefix
-    relationship to chain consecutive calls into one session (context creep),
-    with no code change from the caller.
+    (and a shared conversation root) to group calls, with no caller change.
+
+    The system block is deliberately excluded. Agents like Claude Code rewrite
+    it every call (date, working dir, context-budget reminders), so including it
+    would change the fingerprint on every turn and split one run into a call per
+    turn. The conversation identity is the message list; the system prompt's
+    template identity is captured separately by route_label.
     """
     payload = payload or {}
     fps: list[str] = []
     if provider == "anthropic":
-        system = payload.get("system")
-        if system:
-            text = system if isinstance(system, str) else " ".join(
-                b.get("text", "") for b in system if isinstance(b, dict)
-            )
-            fps.append("s:" + _fp(text))
         for message in payload.get("messages") or []:
             role = message.get("role", "user")
             text = " ".join(t for _, t in _anthropic_message_parts(message))
@@ -229,6 +229,8 @@ def message_fingerprint(payload: dict | None, provider: str) -> list[str]:
     else:
         for message in payload.get("messages") or []:
             role = message.get("role", "user")
+            if role == "system":  # volatile, same reasoning as the anthropic system block
+                continue
             fps.append(role[:1] + ":" + _fp(_openai_message_text(message)))
     return fps
 
