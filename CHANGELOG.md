@@ -4,6 +4,14 @@ All notable changes to llmprof are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and llmprof follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-06-16
+
+### Changed
+- **The npm launcher page now shows the demo.** Added the demo image and a
+  live-demo link to the launcher README so `npmjs.com/package/llmprof` is not
+  text-only. Launcher and PyPI versions bump together because the launcher pins
+  the matching `llmprof` release.
+
 ## [0.1.2] - 2026-06-16
 
 ### Fixed
@@ -57,6 +65,7 @@ Initial public release.
   headless dashboard harness, so token and cost correctness is checked against
   real captured responses rather than by eye.
 
+[0.1.3]: https://github.com/luthraG/llmprof/releases/tag/v0.1.3
 [0.1.2]: https://github.com/luthraG/llmprof/releases/tag/v0.1.2
 [0.1.1]: https://github.com/luthraG/llmprof/releases/tag/v0.1.1
 [0.1.0]: https://github.com/luthraG/llmprof/releases/tag/v0.1.0

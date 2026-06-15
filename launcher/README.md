@@ -2,6 +2,10 @@
 
 **pprof for your LLM context** - run it with no Python install.
 
+[![llmprof: a flame graph of where every token in your context went, plus the dollars you can reclaim](https://raw.githubusercontent.com/luthraG/llmprof/main/assets/demo.webp)](https://luthrag.github.io/llmprof/try/)
+
+[Try the live dashboard in your browser](https://luthrag.github.io/llmprof/try/) - no install, a real recorded session.
+
 ```bash
 npx llmprof up
 ```
