@@ -45,6 +45,19 @@ packages = ["src/llmprof"]
 artifacts = ["src/llmprof/ui/index.html", "src/llmprof/ui/app.css", "src/llmprof/ui/app.js",
              "src/llmprof/data/model_prices.json"]
 
+# Keep the sdist to source plus metadata. Without an explicit list hatchling sweeps in
+# untracked tree contents (docs/node_modules alone is ~75 MB). Patterns are anchored with a
+# leading slash so a bare name like LICENSE does not also match docs/node_modules/*/LICENSE.
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src/llmprof",
+  "/tests",
+  "/README.md",
+  "/CHANGELOG.md",
+  "/LICENSE",
+  "/pyproject.toml",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py39"
