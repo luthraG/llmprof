@@ -52,12 +52,15 @@ def normalize_usage(usage) -> dict:
     det = g("prompt_tokens_details")
     if cached is None and isinstance(det, dict):
         cached = det.get("cached_tokens")
+    write = g("cache_creation_input_tokens")
     if prompt is not None:
         out["prompt"] = prompt
     if completion is not None:
         out["completion"] = completion
     if cached is not None:
         out["cached"] = cached
+    if write is not None:
+        out["cache_write"] = write
     return out
 
 
@@ -107,8 +110,9 @@ def build_trace(model: str, provider: str, entries, called, usage: dict | None =
     prompt = prompt if prompt is not None else tree["tokens"]
     completion = usage.get("completion") or 0
     cached = usage.get("cached") or 0
-    fresh = max((prompt or 0) - cached, 0)
-    eff = pricing.effective_input_per_1k(model, provider, fresh, cached, 0)
+    write = usage.get("cache_write") or 0
+    fresh = max((prompt or 0) - cached - write, 0)
+    eff = pricing.effective_input_per_1k(model, provider, fresh, cached, write)
     ana = analyze.analyze(
         tree, [e[3] for e in entries], input_per_1k=eff,
         cached_tokens=cached, called_tools=called or None, model=model,
@@ -119,8 +123,8 @@ def build_trace(model: str, provider: str, entries, called, usage: dict | None =
         "provider": provider, "model": model, "endpoint": "sdk", "status": 200,
         "prompt_tokens": prompt, "completion_tokens": completion,
         "total_tokens": (prompt or 0) + (completion or 0),
-        "cost_usd": pricing.cost_cached(model, provider, fresh, cached, 0, completion),
+        "cost_usd": pricing.cost_cached(model, provider, fresh, cached, write, completion),
         "streamed": False, "components": components, "detail": tree,
-        "cached_tokens": cached, "cache_write_tokens": 0, "called_tools": called,
+        "cached_tokens": cached, "cache_write_tokens": write, "called_tools": called,
         "session_hint": session, "analysis": ana, "reclaimable_usd": ana["reclaimable_usd"],
     }

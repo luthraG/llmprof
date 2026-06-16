@@ -4,6 +4,15 @@ All notable changes to llmprof are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and llmprof follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **SDK ingest now prices cache-creation tokens.** `ingest.build_trace` (the
+  Python/JS SDK path) dropped `cache_creation_input_tokens` and passed zero for
+  cache-write cost, so SDK-recorded traces under-priced cache writes. It now
+  reads the field and prices it at the cache-write rate, matching the proxy. The
+  proxy path was already correct, so live proxy data is unaffected.
+
 ## [0.1.4] - 2026-06-16
 
 ### Fixed

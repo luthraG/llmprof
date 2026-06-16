@@ -6,6 +6,25 @@ import llmprof
 from llmprof.store import Store
 
 
+def test_sdk_usage_prices_cache_creation():
+    """SDK ingest must read cache_creation_input_tokens and price it at the
+    cache-write rate, matching the proxy, instead of dropping it."""
+    from llmprof import ingest
+    u = ingest.normalize_usage({
+        "input_tokens": 1000, "output_tokens": 200,
+        "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 8000,
+    })
+    assert u["cache_write"] == 8000
+    entries, called = ingest.normalize_items(
+        [{"component": "system prompt", "tokens": 14000}], model="claude-opus-4-8")
+    tr = ingest.build_trace("claude-opus-4-8", "anthropic", entries, called, usage=u)
+    assert tr["cache_write_tokens"] == 8000
+    # the same call with cache-creation dropped must cost strictly less
+    u0 = {k: v for k, v in u.items() if k != "cache_write"}
+    tr0 = ingest.build_trace("claude-opus-4-8", "anthropic", entries, called, usage=u0)
+    assert tr["cost_usd"] > tr0["cost_usd"]
+
+
 def test_profile_records_tagged_components(tmp_path):
     db = str(tmp_path / "sdk.db")
     with llmprof.profile(model="gpt-4o", db_path=db) as p:
