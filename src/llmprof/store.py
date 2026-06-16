@@ -295,7 +295,10 @@ class SQLiteStore(BaseStore):
         """Per-day totals (oldest to newest), for trend charts."""
         with self._connect() as conn:
             rows = conn.execute(
-                """SELECT date(ts, 'unixepoch') AS day, COUNT(*) AS calls,
+                # bucket by LOCAL day, not UTC, so "today"/"yesterday" match the
+                # user's wall clock and provider tools (e.g. ccusage) instead of
+                # splitting a late-night session across two calendar days.
+                """SELECT date(ts, 'unixepoch', 'localtime') AS day, COUNT(*) AS calls,
                           COALESCE(SUM(total_tokens), 0) AS tokens,
                           COALESCE(SUM(cost_usd), 0) AS cost
                    FROM traces GROUP BY day ORDER BY day DESC LIMIT ?""",

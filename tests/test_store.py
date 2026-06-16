@@ -106,6 +106,28 @@ def test_reclaimable_projection_is_gated(tmp_path):
     assert big["monthly_calls"] == 900
 
 
+def test_daily_summary_buckets_by_local_day(tmp_path):
+    """Daily buckets follow the local wall clock, not UTC, so a late-night call is
+    counted on the user's day (matching provider tools), not the previous UTC day."""
+    import os
+    import time
+    old_tz = os.environ.get("TZ")
+    os.environ["TZ"] = "Asia/Kolkata"  # UTC+5:30
+    time.tzset()
+    try:
+        st = SQLiteStore(str(tmp_path / "tz.db"))
+        # 2023-11-14T20:00:00Z is 2023-11-15 01:30 IST -> local day is the 15th
+        st.record(_dup_trace(1699992000))
+        days = st.daily_summary()
+        assert days[-1]["day"] == "2023-11-15"  # local (IST) day, not the UTC 14th
+    finally:
+        if old_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old_tz
+        time.tzset()
+
+
 def _tool_trace(ts, shipped, called, *, cost=0.05, cached=0, prompt=20000):
     """A trace shipping `shipped` tool schemas (name -> tokens), calling `called`."""
     children = [{"name": n, "tokens": t, "children": []} for n, t in shipped.items()]

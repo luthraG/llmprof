@@ -4,6 +4,15 @@ All notable changes to llmprof are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and llmprof follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-06-16
+
+### Fixed
+- **"Today" and the daily chart now use your local day, not UTC.** Day buckets
+  were computed in UTC, so a late-night session landed on the previous calendar
+  day and "today's" totals looked far lower than provider tools like ccusage
+  (which use the local day). Daily totals now bucket by local time, so the day
+  cards and the cost-per-day chart line up with your wall clock.
+
 ## [0.1.3] - 2026-06-16
 
 ### Changed
@@ -65,6 +74,7 @@ Initial public release.
   headless dashboard harness, so token and cost correctness is checked against
   real captured responses rather than by eye.
 
+[0.1.4]: https://github.com/luthraG/llmprof/releases/tag/v0.1.4
 [0.1.3]: https://github.com/luthraG/llmprof/releases/tag/v0.1.3
 [0.1.2]: https://github.com/luthraG/llmprof/releases/tag/v0.1.2
 [0.1.1]: https://github.com/luthraG/llmprof/releases/tag/v0.1.1

@@ -284,7 +284,8 @@ function drawSpark() {
     for (const d of SUMMARY.days) byDay[d.day] = d.cost || 0;
   } else {
     for (const t of TRACES) {
-      const d = new Date((t.ts||0) * 1000).toISOString().slice(0, 10);
+      const dt = new Date((t.ts||0) * 1000);  // local day, to match the summary's day buckets
+      const d = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
       byDay[d] = (byDay[d] || 0) + (t.cost_usd || 0);
     }
   }
